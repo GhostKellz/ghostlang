@@ -1,6 +1,8 @@
 # ghostlang
 
-<img src="assets/icons/gza-main.png" alt="ghostlang logo" width="200"/>
+<p align="center">
+  <img src="assets/icons/ghostlang.png" alt="ghostlang logo" width="200"/>
+</p>
 
 [![Built with Zig](https://img.shields.io/badge/built%20with-Zig-orange)](https://ziglang.org/)
 [![Zig Version](https://img.shields.io/badge/zig-0.16.0--dev-orange)](https://ziglang.org/download/)
