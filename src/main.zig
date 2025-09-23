@@ -14,10 +14,108 @@ pub fn main() !void {
 
     try engine.registerFunction("print", printFunc);
 
-    var script = try engine.loadScript("3 + 4");
-    defer script.deinit();
-    const result = try script.run();
-    std.debug.print("Script result: {}\n", .{result.number});
+    // Test simple expression
+    std.debug.print("Testing: 3 + 4\n", .{});
+    var script1 = try engine.loadScript("3 + 4");
+    defer script1.deinit();
+
+    // Print generated instructions for debugging
+    std.debug.print("Generated {} instructions:\n", .{script1.vm.code.len});
+    for (script1.vm.code, 0..) |instr, i| {
+        std.debug.print("  {}: opcode={} operands=[{}, {}, {}]\n", .{i, instr.opcode, instr.operands[0], instr.operands[1], instr.operands[2]});
+    }
+    std.debug.print("Generated {} constants:\n", .{script1.vm.constants.len});
+    for (script1.vm.constants, 0..) |constant, i| {
+        std.debug.print("  {}: {}\n", .{i, constant});
+    }
+
+    const result1 = try script1.run();
+    std.debug.print("Simple expression result: {}\n", .{result1.number});
+
+    // Test just function call (without definition)
+    std.debug.print("\nTesting simple function call:\n", .{});
+    const call_code = "print(42)";
+
+    var script2a = try engine.loadScript(call_code);
+    defer script2a.deinit();
+    std.debug.print("Call instructions:\n", .{});
+    for (script2a.vm.code, 0..) |instr, i| {
+        std.debug.print("  {}: opcode={} operands=[{}, {}, {}]\n", .{i, instr.opcode, instr.operands[0], instr.operands[1], instr.operands[2]});
+    }
+    _ = try script2a.run();
+
+    // Test just function definition
+    std.debug.print("\nTesting function definition:\n", .{});
+    const def_code =
+        \\function add(a, b)
+        \\    return 5 + 6
+        \\end
+    ;
+
+    var script2b = try engine.loadScript(def_code);
+    defer script2b.deinit();
+    _ = try script2b.run();
+
+    // Functions are not shared between scripts for now
+
+    // Test function definition + actual function call
+    std.debug.print("\nTesting function def + calling defined function:\n", .{});
+    const func_and_call =
+        \\function add(a, b)
+        \\    return 5 + 6
+        \\end;
+        \\add(1, 2)
+    ;
+
+    var script2e = try engine.loadScript(func_and_call);
+    defer script2e.deinit();
+    const result2e = try script2e.run();
+    std.debug.print("Function + call result: {}\n", .{result2e});
+
+    // Test local variables
+    std.debug.print("\nTesting local variables:\n", .{});
+    const local_code =
+        \\local x = 42;
+        \\local y = 10;
+        \\x + y
+    ;
+
+    var script3 = try engine.loadScript(local_code);
+    defer script3.deinit();
+    const result3 = try script3.run();
+    std.debug.print("Local variables result: {}\n", .{result3});
+
+    // Test simple if statement (no else)
+    std.debug.print("\nTesting simple if statement:\n", .{});
+    const simple_if_code =
+        \\local x = 5;
+        \\if (x < 10) {
+        \\    42
+        \\}
+    ;
+
+    var script4 = try engine.loadScript(simple_if_code);
+    defer script4.deinit();
+    const result4 = try script4.run();
+    std.debug.print("Simple if result: {}\n", .{result4});
+
+    // Test table creation
+    std.debug.print("\nTesting table creation:\n", .{});
+    const table_code = "local t = {name = 42}";
+
+    var script5 = try engine.loadScript(table_code);
+    defer script5.deinit();
+    const result5 = try script5.run();
+    std.debug.print("Table creation result: {}\n", .{result5});
+
+    // Test require (basic stub)
+    std.debug.print("\nTesting require statement:\n", .{});
+    const require_code = "local mod = require(\"utils.gza\")";
+
+    var script6 = try engine.loadScript(require_code);
+    defer script6.deinit();
+    const result6 = try script6.run();
+    std.debug.print("Require result: {}\n", .{result6});
 
     // Call a script function
     // const call_result = try engine.call("add", .{1, 2});

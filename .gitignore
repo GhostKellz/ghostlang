@@ -3,3 +3,6 @@
 *.o
 *.exe
 TODO.md
+CLAUDE.md
+.zig-cache/
+
