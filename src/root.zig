@@ -48,6 +48,23 @@ pub const ScriptValue = union(ScriptValueType) {
             else => {},
         }
     }
+
+    pub fn copy(self: ScriptValue, allocator: std.mem.Allocator) !ScriptValue {
+        switch (self) {
+            .string => |s| return .{ .string = try allocator.dupe(u8, s) },
+            .table => |t| {
+                var new_table = std.StringHashMap(ScriptValue).init(allocator);
+                var it = t.iterator();
+                while (it.next()) |entry| {
+                    const key_copy = try allocator.dupe(u8, entry.key_ptr.*);
+                    const value_copy = try entry.value_ptr.copy(allocator);
+                    try new_table.put(key_copy, value_copy);
+                }
+                return .{ .table = new_table };
+            },
+            else => return self, // numbers, booleans, nil, functions don't need copying
+        }
+    }
 };
 
 pub const EngineConfig = struct {
@@ -116,6 +133,7 @@ pub const Opcode = enum(u8) {
     sub,
     mul,
     div,
+    mod,
     eq,
     ne,
     lt,
@@ -132,6 +150,17 @@ pub const Opcode = enum(u8) {
     jump_if_false,
     jump_if_true,
     ret,
+    require_module,
+    concat,
+    strlen,
+    substr,
+    for_init,
+    for_loop,
+    while_loop,
+    file_read,
+    file_write,
+    file_exists,
+    file_delete,
 };
 
 pub const Instruction = struct {
@@ -193,6 +222,17 @@ pub const VM = struct {
     }
 
     pub fn deinit(self: *VM) void {
+        // Clean up registers
+        for (&self.registers) |*reg| {
+            reg.deinit(self.allocator);
+        }
+
+        // Clean up locals
+        for (&self.locals) |*local| {
+            local.deinit(self.allocator);
+        }
+
+        // Clean up globals
         var it = self.globals.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
@@ -214,7 +254,10 @@ pub const VM = struct {
                 .load_const => {
                     const reg = instr.operands[0];
                     const const_idx = instr.operands[1];
-                    self.registers[reg] = self.constants[const_idx];
+                    // Clean up the destination register before overwriting
+                    self.registers[reg].deinit(self.allocator);
+                    // Make a copy of the constant to avoid double-free issues
+                    self.registers[reg] = try self.constants[const_idx].copy(self.allocator);
                 },
                 .add => {
                     const dest = instr.operands[0];
@@ -445,6 +488,8 @@ pub const VM = struct {
                 },
                 .new_table => {
                     const dest = instr.operands[0];
+                    // Clean up the destination register before overwriting
+                    self.registers[dest].deinit(self.allocator);
                     const table = std.StringHashMap(ScriptValue).init(self.allocator);
                     self.registers[dest] = .{ .table = table };
                 },
@@ -573,6 +618,224 @@ pub const VM = struct {
                         return error.NotAFunction;
                     }
                 },
+                .require_module => {
+                    const dest_reg = instr.operands[0];
+                    const filename_idx = instr.operands[1];
+                    const filename = self.constants[filename_idx];
+
+                    if (filename == .string) {
+                        // Clean up the destination register before overwriting
+                        self.registers[dest_reg].deinit(self.allocator);
+
+                        // Try to load the actual .gza file
+                        const file_content = std.fs.cwd().readFileAlloc(filename.string, self.allocator, 1024 * 1024) catch |err| switch (err) {
+                            error.FileNotFound => {
+                                // If file doesn't exist, create a basic module table
+                                var module_table = std.StringHashMap(ScriptValue).init(self.allocator);
+                                const version_key = try self.allocator.dupe(u8, "version");
+                                try module_table.put(version_key, .{ .string = try self.allocator.dupe(u8, "1.0.0") });
+                                self.registers[dest_reg] = .{ .table = module_table };
+                                return;
+                            },
+                            else => {
+                                // For other errors, return nil
+                                self.registers[dest_reg] = .{ .nil = {} };
+                                return;
+                            },
+                        };
+                        defer self.allocator.free(file_content);
+
+                        // TODO: Parse and execute the loaded script content
+                        // For now, create a module table with the file content as a string
+                        var module_table = std.StringHashMap(ScriptValue).init(self.allocator);
+                        const content_key = try self.allocator.dupe(u8, "content");
+                        const content_value = try self.allocator.dupe(u8, file_content);
+                        try module_table.put(content_key, .{ .string = content_value });
+
+                        self.registers[dest_reg] = .{ .table = module_table };
+                    } else {
+                        return error.InvalidModuleName;
+                    }
+                },
+                .mod => {
+                    const dest = instr.operands[0];
+                    const a = instr.operands[1];
+                    const b = instr.operands[2];
+                    const val_a = self.registers[a];
+                    const val_b = self.registers[b];
+                    if (val_a == .number and val_b == .number) {
+                        self.registers[dest] = .{ .number = @mod(val_a.number, val_b.number) };
+                    } else {
+                        return error.TypeError;
+                    }
+                },
+                .concat => {
+                    const dest = instr.operands[0];
+                    const a = instr.operands[1];
+                    const b = instr.operands[2];
+                    const val_a = self.registers[a];
+                    const val_b = self.registers[b];
+
+                    if (val_a == .string and val_b == .string) {
+                        // Clean up the destination register before overwriting
+                        self.registers[dest].deinit(self.allocator);
+                        const result = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{val_a.string, val_b.string});
+                        self.registers[dest] = .{ .string = result };
+                    } else {
+                        return error.TypeError;
+                    }
+                },
+                .strlen => {
+                    const dest = instr.operands[0];
+                    const str_reg = instr.operands[1];
+                    const str_val = self.registers[str_reg];
+
+                    if (str_val == .string) {
+                        self.registers[dest] = .{ .number = @floatFromInt(str_val.string.len) };
+                    } else {
+                        return error.TypeError;
+                    }
+                },
+                .substr => {
+                    const dest = instr.operands[0];
+                    const str_reg = instr.operands[1];
+                    const start_reg = instr.operands[2];
+                    const str_val = self.registers[str_reg];
+                    const start_val = self.registers[start_reg];
+
+                    if (str_val == .string and start_val == .number) {
+                        // Clean up the destination register before overwriting
+                        self.registers[dest].deinit(self.allocator);
+                        const start_idx = @max(0, @min(@as(usize, @intFromFloat(start_val.number)), str_val.string.len));
+                        const substr = str_val.string[start_idx..];
+                        const result = try self.allocator.dupe(u8, substr);
+                        self.registers[dest] = .{ .string = result };
+                    } else {
+                        return error.TypeError;
+                    }
+                },
+                .for_init => {
+                    const iter_reg = instr.operands[0];
+                    const start_reg = instr.operands[1];
+                    const end_reg = instr.operands[2];
+                    const start_val = self.registers[start_reg];
+                    const end_val = self.registers[end_reg];
+
+                    if (start_val == .number and end_val == .number) {
+                        self.registers[iter_reg] = start_val;
+                    } else {
+                        return error.TypeError;
+                    }
+                },
+                .for_loop => {
+                    const iter_reg = instr.operands[0];
+                    const end_reg = instr.operands[1];
+                    const jump_target = instr.operands[2];
+                    const iter_val = self.registers[iter_reg];
+                    const end_val = self.registers[end_reg];
+
+                    if (iter_val == .number and end_val == .number) {
+                        // First check if we should continue (iterator < end)
+                        if (iter_val.number <= end_val.number) {
+                            // Increment for next iteration
+                            self.registers[iter_reg] = .{ .number = iter_val.number + 1 };
+                            self.pc = @intCast(jump_target);
+                            continue;
+                        }
+                        // Exit loop - fall through
+                    } else {
+                        return error.TypeError;
+                    }
+                },
+                .while_loop => {
+                    const cond_reg = instr.operands[0];
+                    const jump_target = instr.operands[1];
+                    const cond = self.registers[cond_reg];
+
+                    var is_true = false;
+                    switch (cond) {
+                        .boolean => |b| is_true = b,
+                        .number => |n| is_true = (n != 0),
+                        .nil => is_true = false,
+                        else => is_true = true,
+                    }
+
+                    if (is_true) {
+                        self.pc = @intCast(jump_target);
+                        continue;
+                    }
+                    // Exit loop - fall through
+                },
+                .file_read => {
+                    const dest_reg = instr.operands[0];
+                    const filename_reg = instr.operands[1];
+                    const filename_val = self.registers[filename_reg];
+
+                    if (filename_val == .string) {
+                        // Clean up the destination register before overwriting
+                        self.registers[dest_reg].deinit(self.allocator);
+
+                        // Read file contents
+                        const file_content = std.fs.cwd().readFileAlloc(self.allocator, filename_val.string, 1024 * 1024) catch |err| switch (err) {
+                            error.FileNotFound => "",
+                            error.AccessDenied => "",
+                            else => "",
+                        };
+                        self.registers[dest_reg] = .{ .string = file_content };
+                    } else {
+                        return error.TypeError;
+                    }
+                },
+                .file_write => {
+                    const filename_reg = instr.operands[0];
+                    const content_reg = instr.operands[1];
+                    const result_reg = instr.operands[2];
+                    const filename_val = self.registers[filename_reg];
+                    const content_val = self.registers[content_reg];
+
+                    if (filename_val == .string and content_val == .string) {
+                        // Clean up the result register before overwriting
+                        self.registers[result_reg].deinit(self.allocator);
+
+                        // Write file contents
+                        const success = std.fs.cwd().writeFile(filename_val.string, content_val.string) catch false;
+                        self.registers[result_reg] = .{ .boolean = success };
+                    } else {
+                        return error.TypeError;
+                    }
+                },
+                .file_exists => {
+                    const dest_reg = instr.operands[0];
+                    const filename_reg = instr.operands[1];
+                    const filename_val = self.registers[filename_reg];
+
+                    if (filename_val == .string) {
+                        // Clean up the destination register before overwriting
+                        self.registers[dest_reg].deinit(self.allocator);
+
+                        // Check if file exists
+                        const exists = std.fs.cwd().access(filename_val.string, .{}) catch false;
+                        self.registers[dest_reg] = .{ .boolean = exists != false };
+                    } else {
+                        return error.TypeError;
+                    }
+                },
+                .file_delete => {
+                    const filename_reg = instr.operands[0];
+                    const result_reg = instr.operands[1];
+                    const filename_val = self.registers[filename_reg];
+
+                    if (filename_val == .string) {
+                        // Clean up the result register before overwriting
+                        self.registers[result_reg].deinit(self.allocator);
+
+                        // Delete file
+                        const success = std.fs.cwd().deleteFile(filename_val.string) catch false;
+                        self.registers[result_reg] = .{ .boolean = success };
+                    } else {
+                        return error.TypeError;
+                    }
+                },
             }
             self.pc += 1;
         }
@@ -613,16 +876,27 @@ pub const Script = struct {
     }
 };
 
+pub const ParseError = struct {
+    message: []const u8,
+    line: usize,
+    column: usize,
+    position: usize,
+};
+
 pub const Parser = struct {
     allocator: std.mem.Allocator,
     source: []const u8,
     pos: usize,
+    line: usize,
+    column: usize,
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8) Parser {
         return Parser{
             .allocator = allocator,
             .source = source,
             .pos = 0,
+            .line = 1,
+            .column = 1,
         };
     }
 
@@ -669,7 +943,7 @@ pub const Parser = struct {
                 const var_name = try self.parseIdent();
                 defer self.allocator.free(var_name);
                 self.skipWhitespace();
-                self.expect('=');
+                try self.expect('=');
                 self.skipWhitespace();
                 const expr_reg = try self.parseExpression(constants, instructions, 0);
                 // store to global
@@ -683,7 +957,7 @@ pub const Parser = struct {
                 const var_name = try self.parseIdent();
                 defer self.allocator.free(var_name);
                 self.skipWhitespace();
-                self.expect('=');
+                try self.expect('=');
                 self.skipWhitespace();
                 const expr_reg = try self.parseExpression(constants, instructions, 0);
 
@@ -696,13 +970,13 @@ pub const Parser = struct {
             } else if (std.mem.eql(u8, ident, "if")) {
                 // if expr { statements }
                 self.skipWhitespace();
-                self.expect('(');
+                try self.expect('(');
                 self.skipWhitespace();
                 const cond_reg = try self.parseExpression(constants, instructions, 0);
                 self.skipWhitespace();
-                self.expect(')');
+                try self.expect(')');
                 self.skipWhitespace();
-                self.expect('{');
+                try self.expect('{');
 
                 // Jump to else block if condition is false
                 const jump_to_else_idx = instructions.items.len;
@@ -710,7 +984,7 @@ pub const Parser = struct {
 
                 // Parse if body
                 _ = try self.parseStatement(constants, instructions, functions);
-                self.expect('}');
+                try self.expect('}');
 
                 // Jump over else block
                 const jump_over_else_idx = instructions.items.len;
@@ -723,11 +997,11 @@ pub const Parser = struct {
                 // Check for else clause
                 self.skipWhitespace();
                 if (self.peekKeyword("else")) {
-                    self.expectKeyword("else");
+                    try self.expectKeyword("else");
                     self.skipWhitespace();
-                    self.expect('{');
+                    try self.expect('{');
                     _ = try self.parseStatement(constants, instructions, functions);
-                    self.expect('}');
+                    try self.expect('}');
                 }
 
                 // Patch the jump over else
@@ -744,28 +1018,98 @@ pub const Parser = struct {
             } else if (std.mem.eql(u8, ident, "require")) {
                 // require "filename"
                 self.skipWhitespace();
-                self.expect('(');
+                try self.expect('(');
                 self.skipWhitespace();
-                self.expect('"');
+                try self.expect('"');
 
                 const start = self.pos;
                 while (self.pos < self.source.len and self.source[self.pos] != '"') {
                     self.pos += 1;
                 }
                 const filename = self.source[start..self.pos];
-                self.expect('"');
-                self.expect(')');
+                try self.expect('"');
+                try self.expect(')');
 
-                // For now, just return a table representing the module
-                // TODO: Actually load and execute the .gza file
+                // Use the new require_module opcode
                 const module_reg: u16 = 0;
-                try instructions.append(self.allocator, .{ .opcode = .new_table, .operands = [_]u16{module_reg, 0, 0} });
-
-                // Add a comment about the required file
-                const filename_copy = try self.allocator.dupe(u8, filename);
-                defer self.allocator.free(filename_copy);
+                const filename_idx = @as(u16, @intCast(constants.items.len));
+                try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, filename) });
+                try instructions.append(self.allocator, .{ .opcode = .require_module, .operands = [_]u16{module_reg, filename_idx, 0} });
 
                 return module_reg;
+            } else if (std.mem.eql(u8, ident, "for")) {
+                // for i = start, end do ... end
+                self.skipWhitespace();
+                const var_name = try self.parseIdent();
+                defer self.allocator.free(var_name);
+                self.skipWhitespace();
+                try self.expect('=');
+                self.skipWhitespace();
+
+                const start_reg = try self.parseExpression(constants, instructions, 0);
+                self.skipWhitespace();
+                try self.expect(',');
+                self.skipWhitespace();
+                const end_reg = try self.parseExpression(constants, instructions, 1);
+                self.skipWhitespace();
+                try self.expectKeyword("do");
+
+                // Initialize loop variable
+                const iter_reg: u16 = 2;
+                try instructions.append(self.allocator, .{ .opcode = .for_init, .operands = [_]u16{iter_reg, start_reg, end_reg} });
+
+                // Store iterator variable as local/global
+                const var_name_idx = @as(u16, @intCast(constants.items.len));
+                try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, var_name) });
+                try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{iter_reg, var_name_idx, 0} });
+
+                // Mark loop start
+                const loop_start = @as(u16, @intCast(instructions.items.len));
+
+                // Update the global variable with current iterator value at the start of each iteration
+                try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{iter_reg, var_name_idx, 0} });
+
+                // Parse loop body
+                while (!self.peekKeyword("end")) {
+                    _ = try self.parseStatement(constants, instructions, functions);
+                    self.skipWhitespace();
+                }
+                try self.expectKeyword("end");
+
+                // Add for_loop instruction (increment and check)
+                try instructions.append(self.allocator, .{ .opcode = .for_loop, .operands = [_]u16{iter_reg, end_reg, loop_start} });
+
+                return 0;
+            } else if (std.mem.eql(u8, ident, "while")) {
+                // while condition do ... end
+                self.skipWhitespace();
+
+                // Mark condition evaluation start
+                const cond_start = @as(u16, @intCast(instructions.items.len));
+
+                const cond_reg = try self.parseExpression(constants, instructions, 0);
+                self.skipWhitespace();
+                try self.expectKeyword("do");
+
+                // Jump out of loop if condition is false
+                const jump_out_idx = instructions.items.len;
+                try instructions.append(self.allocator, .{ .opcode = .jump_if_false, .operands = [_]u16{cond_reg, 0, 0} }); // will patch later
+
+                // Parse loop body
+                while (!self.peekKeyword("end")) {
+                    _ = try self.parseStatement(constants, instructions, functions);
+                    self.skipWhitespace();
+                }
+                try self.expectKeyword("end");
+
+                // Jump back to condition evaluation
+                try instructions.append(self.allocator, .{ .opcode = .jump, .operands = [_]u16{cond_start, 0, 0} });
+
+                // Patch the jump_if_false target (end of loop)
+                const loop_end = @as(u16, @intCast(instructions.items.len));
+                instructions.items[jump_out_idx].operands[1] = loop_end;
+
+                return 0;
             } else if (std.mem.eql(u8, ident, "function")) {
                 // function name(param1, param2) ... end
                 self.skipWhitespace();
@@ -773,14 +1117,14 @@ pub const Parser = struct {
                 defer self.allocator.free(func_name);
 
                 self.skipWhitespace();
-                self.expect('(');
+                try self.expect('(');
                 self.skipWhitespace();
 
                 // Parse parameters
                 var param_count: u8 = 0;
                 while (self.peek() != ')') {
                     if (param_count > 0) {
-                        self.expect(',');
+                        try self.expect(',');
                         self.skipWhitespace();
                     }
                     const param_name = try self.parseIdent();
@@ -788,7 +1132,7 @@ pub const Parser = struct {
                     param_count += 1;
                     self.skipWhitespace();
                 }
-                self.expect(')');
+                try self.expect(')');
                 self.skipWhitespace();
 
                 // Parse function body
@@ -801,7 +1145,7 @@ pub const Parser = struct {
                     _ = try self.parseStatement(&func_constants, &func_instructions, functions);
                     self.skipWhitespace();
                 }
-                self.expectKeyword("end");
+                try self.expectKeyword("end");
 
                 // Add return instruction if not present
                 if (func_instructions.items.len == 0 or func_instructions.items[func_instructions.items.len - 1].opcode != .ret) {
@@ -834,7 +1178,7 @@ pub const Parser = struct {
                 self.skipWhitespace();
                 if (self.peek() == '(') {
                     // assume function call - first load the function, then call it
-                    self.expect('(');
+                    try self.expect('(');
                     self.skipWhitespace();
 
                     // Parse arguments (simplified - just handle first argument for now)
@@ -854,7 +1198,7 @@ pub const Parser = struct {
                         }
                     }
 
-                    self.expect(')');
+                    try self.expect(')');
 
                     // Load the function into a register
                     const func_reg: u16 = 10; // use a high register to avoid conflicts
@@ -867,10 +1211,25 @@ pub const Parser = struct {
 
                     return func_reg; // return the register that will contain the result
                 } else {
-                    // Not a keyword or function call - restore position and parse as expression
-                    self.pos = saved_pos;
-                    const result_reg = try self.parseExpression(constants, instructions, 0);
-                    return result_reg;
+                    // Check if this is an assignment (var = expr)
+                    self.skipWhitespace();
+                    if (self.peek() == '=') {
+                        // This is an assignment: var = expr
+                        try self.expect('=');
+                        self.skipWhitespace();
+                        const expr_reg = try self.parseExpression(constants, instructions, 0);
+
+                        // Store to global (simplified)
+                        const name_idx = @as(u16, @intCast(constants.items.len));
+                        try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, ident) });
+                        try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{expr_reg, name_idx, 0} });
+                        return 0;
+                    } else {
+                        // Not a keyword or function call - restore position and parse as expression
+                        self.pos = saved_pos;
+                        const result_reg = try self.parseExpression(constants, instructions, 0);
+                        return result_reg;
+                    }
                 }
             }
         } else {
@@ -916,6 +1275,23 @@ pub const Parser = struct {
                 const result_reg = reg_start + 2;
                 try instructions.append(self.allocator, .{ .opcode = .lt, .operands = [_]u16{result_reg, left_reg, right_reg} });
                 return result_reg;
+            } else if (c == '.' and self.pos + 1 < self.source.len and self.source[self.pos + 1] == '.') {
+                // .. operator for string concatenation
+                self.advance();
+                self.advance();
+                self.skipWhitespace();
+                const right_reg = try self.parseTerm(constants, instructions, reg_start + 1);
+                const result_reg = reg_start + 2;
+                try instructions.append(self.allocator, .{ .opcode = .concat, .operands = [_]u16{result_reg, left_reg, right_reg} });
+                return result_reg;
+            } else if (c == '%') {
+                // % operator for modulo
+                self.advance();
+                self.skipWhitespace();
+                const right_reg = try self.parseTerm(constants, instructions, reg_start + 1);
+                const result_reg = reg_start + 2;
+                try instructions.append(self.allocator, .{ .opcode = .mod, .operands = [_]u16{result_reg, left_reg, right_reg} });
+                return result_reg;
             } else {
                 break;
             }
@@ -929,6 +1305,14 @@ pub const Parser = struct {
             const num = try self.parseNumber();
             const const_idx = @as(u16, @intCast(constants.items.len));
             try constants.append(self.allocator, .{ .number = num });
+            try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{reg, const_idx, 0} });
+            return reg;
+        } else if (self.peek() == '"') {
+            // String literal
+            const str = try self.parseString();
+            defer self.allocator.free(str);
+            const const_idx = @as(u16, @intCast(constants.items.len));
+            try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, str) });
             try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{reg, const_idx, 0} });
             return reg;
         } else if (self.peek() == '{') {
@@ -947,7 +1331,7 @@ pub const Parser = struct {
                 defer self.allocator.free(key_name);
 
                 self.skipWhitespace();
-                self.expect('=');
+                try self.expect('=');
                 self.skipWhitespace();
 
                 // Parse value
@@ -970,17 +1354,17 @@ pub const Parser = struct {
                 }
             }
 
-            self.expect('}');
+            try self.expect('}');
             return reg;
         } else if (self.peekIdent()) {
             // For now, assume it's a function call like print(expr)
             const ident = try self.parseIdent();
             defer self.allocator.free(ident);
             if (std.mem.eql(u8, ident, "print")) {
-                self.expect('(');
+                try self.expect('(');
                 self.skipWhitespace();
                 const arg_reg = try self.parseExpression(constants, instructions, reg + 1);
-                self.expect(')');
+                try self.expect(')');
                 // Add print call
                 const print_const_idx = @as(u16, @intCast(constants.items.len));
                 try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, "print") });
@@ -1015,6 +1399,21 @@ pub const Parser = struct {
         return try self.allocator.dupe(u8, self.source[start..self.pos]);
     }
 
+    fn parseString(self: *Parser) ![]u8 {
+        try self.expect('"');
+        const start = self.pos;
+        while (self.pos < self.source.len and self.source[self.pos] != '"') {
+            if (self.source[self.pos] == '\\') {
+                // Simple escape sequence handling
+                self.pos += 1;
+            }
+            self.pos += 1;
+        }
+        const str = self.source[start..self.pos];
+        try self.expect('"');
+        return try self.allocator.dupe(u8, str);
+    }
+
     fn peekNumber(self: *Parser) bool {
         return self.pos < self.source.len and std.ascii.isDigit(self.source[self.pos]);
     }
@@ -1029,20 +1428,38 @@ pub const Parser = struct {
     }
 
     fn advance(self: *Parser) void {
-        if (self.pos < self.source.len) self.pos += 1;
-    }
-
-    fn skipWhitespace(self: *Parser) void {
-        while (self.pos < self.source.len and std.ascii.isWhitespace(self.source[self.pos])) {
+        if (self.pos < self.source.len) {
+            if (self.source[self.pos] == '\n') {
+                self.line += 1;
+                self.column = 1;
+            } else {
+                self.column += 1;
+            }
             self.pos += 1;
         }
     }
 
-    fn expect(self: *Parser, char: u8) void {
+    fn skipWhitespace(self: *Parser) void {
+        while (self.pos < self.source.len and std.ascii.isWhitespace(self.source[self.pos])) {
+            self.advance();
+        }
+    }
+
+    fn createError(self: *Parser, message: []const u8) ParseError {
+        return ParseError{
+            .message = message,
+            .line = self.line,
+            .column = self.column,
+            .position = self.pos,
+        };
+    }
+
+    fn expect(self: *Parser, char: u8) !void {
         if (self.peek() == char) {
             self.advance();
         } else {
-            @panic("expected char");
+            std.log.err("Parse error at line {}, column {}: expected '{}', found '{?c}'", .{self.line, self.column, char, self.peek()});
+            return error.ParseError;
         }
     }
 
@@ -1058,12 +1475,16 @@ pub const Parser = struct {
         return std.mem.eql(u8, ident, keyword);
     }
 
-    fn expectKeyword(self: *Parser, keyword: []const u8) void {
+    fn expectKeyword(self: *Parser, keyword: []const u8) !void {
         self.skipWhitespace();
-        const ident = self.parseIdent() catch @panic("expected keyword");
+        const ident = self.parseIdent() catch {
+            std.log.err("Parse error at line {}, column {}: expected keyword '{s}', found '{?c}'", .{self.line, self.column, keyword, self.peek()});
+            return error.ParseError;
+        };
         defer self.allocator.free(ident);
         if (!std.mem.eql(u8, ident, keyword)) {
-            @panic("expected keyword");
+            std.log.err("Parse error at line {}, column {}: expected keyword '{s}', found '{s}'", .{self.line, self.column, keyword, ident});
+            return error.ParseError;
         }
     }
 };

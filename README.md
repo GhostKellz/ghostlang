@@ -1,7 +1,7 @@
 # ghostlang
 
 <p align="center">
-  <img src="assets/icons/ghostlang.png" alt="ghostlang logo" width="200"/>
+  <img src="assets/icons/glang-proto.png" alt="ghostlang logo" width="200"/>
 </p>
 
 [![Built with Zig](https://img.shields.io/badge/built%20with-Zig-orange)](https://ziglang.org/)
