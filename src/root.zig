@@ -352,10 +352,18 @@ pub const VM = struct {
                     const name_idx = instr.operands[1];
                     const name = self.constants[name_idx];
                     if (name == .string) {
-                        const name_copy = try self.allocator.dupe(u8, name.string);
                         const value_copy = self.registers[reg];
-                        // TODO: deep copy
-                        try self.globals.put(name_copy, value_copy);
+
+                        // Check if global already exists to avoid duplicate key allocation
+                        if (self.globals.getPtr(name.string)) |existing_value| {
+                            // Update existing value
+                            existing_value.deinit(self.allocator);
+                            existing_value.* = value_copy;
+                        } else {
+                            // Create new global
+                            const name_copy = try self.allocator.dupe(u8, name.string);
+                            try self.globals.put(name_copy, value_copy);
+                        }
                     } else {
                         return error.InvalidGlobalName;
                     }
@@ -628,31 +636,32 @@ pub const VM = struct {
                         self.registers[dest_reg].deinit(self.allocator);
 
                         // Try to load the actual .gza file
-                        const file_content = std.fs.cwd().readFileAlloc(filename.string, self.allocator, 1024 * 1024) catch |err| switch (err) {
-                            error.FileNotFound => {
-                                // If file doesn't exist, create a basic module table
-                                var module_table = std.StringHashMap(ScriptValue).init(self.allocator);
-                                const version_key = try self.allocator.dupe(u8, "version");
-                                try module_table.put(version_key, .{ .string = try self.allocator.dupe(u8, "1.0.0") });
-                                self.registers[dest_reg] = .{ .table = module_table };
-                                return;
-                            },
-                            else => {
-                                // For other errors, return nil
-                                self.registers[dest_reg] = .{ .nil = {} };
-                                return;
-                            },
-                        };
-                        defer self.allocator.free(file_content);
+                        if (std.fs.cwd().readFileAlloc(filename.string, self.allocator, .unlimited)) |file_content| {
+                            defer self.allocator.free(file_content);
 
-                        // TODO: Parse and execute the loaded script content
-                        // For now, create a module table with the file content as a string
-                        var module_table = std.StringHashMap(ScriptValue).init(self.allocator);
-                        const content_key = try self.allocator.dupe(u8, "content");
-                        const content_value = try self.allocator.dupe(u8, file_content);
-                        try module_table.put(content_key, .{ .string = content_value });
+                            // TODO: Parse and execute the loaded script content
+                            // For now, create a module table with the file content as a string
+                            var module_table = std.StringHashMap(ScriptValue).init(self.allocator);
+                            const content_key = try self.allocator.dupe(u8, "content");
+                            const content_value = try self.allocator.dupe(u8, file_content);
+                            try module_table.put(content_key, .{ .string = content_value });
 
-                        self.registers[dest_reg] = .{ .table = module_table };
+                            self.registers[dest_reg] = .{ .table = module_table };
+                        } else |err| {
+                            switch (err) {
+                                error.FileNotFound => {
+                                    // If file doesn't exist, create a basic module table
+                                    var module_table = std.StringHashMap(ScriptValue).init(self.allocator);
+                                    const version_key = try self.allocator.dupe(u8, "version");
+                                    try module_table.put(version_key, .{ .string = try self.allocator.dupe(u8, "1.0.0") });
+                                    self.registers[dest_reg] = .{ .table = module_table };
+                                },
+                                else => {
+                                    // For other errors, return nil
+                                    self.registers[dest_reg] = .{ .nil = {} };
+                                },
+                            }
+                        }
                     } else {
                         return error.InvalidModuleName;
                     }
@@ -776,10 +785,10 @@ pub const VM = struct {
                         self.registers[dest_reg].deinit(self.allocator);
 
                         // Read file contents
-                        const file_content = std.fs.cwd().readFileAlloc(self.allocator, filename_val.string, 1024 * 1024) catch |err| switch (err) {
-                            error.FileNotFound => "",
-                            error.AccessDenied => "",
-                            else => "",
+                        const file_content = std.fs.cwd().readFileAlloc(filename_val.string, self.allocator, .unlimited) catch |err| switch (err) {
+                            error.FileNotFound => try self.allocator.dupe(u8, ""),
+                            error.AccessDenied => try self.allocator.dupe(u8, ""),
+                            else => try self.allocator.dupe(u8, ""),
                         };
                         self.registers[dest_reg] = .{ .string = file_content };
                     } else {
@@ -798,7 +807,12 @@ pub const VM = struct {
                         self.registers[result_reg].deinit(self.allocator);
 
                         // Write file contents
-                        const success = std.fs.cwd().writeFile(filename_val.string, content_val.string) catch false;
+                        const success = blk: {
+                            std.fs.cwd().writeFile(.{ .sub_path = filename_val.string, .data = content_val.string }) catch {
+                                break :blk false;
+                            };
+                            break :blk true;
+                        };
                         self.registers[result_reg] = .{ .boolean = success };
                     } else {
                         return error.TypeError;
@@ -814,8 +828,13 @@ pub const VM = struct {
                         self.registers[dest_reg].deinit(self.allocator);
 
                         // Check if file exists
-                        const exists = std.fs.cwd().access(filename_val.string, .{}) catch false;
-                        self.registers[dest_reg] = .{ .boolean = exists != false };
+                        const exists = blk: {
+                            std.fs.cwd().access(filename_val.string, .{}) catch {
+                                break :blk false;
+                            };
+                            break :blk true;
+                        };
+                        self.registers[dest_reg] = .{ .boolean = exists };
                     } else {
                         return error.TypeError;
                     }
@@ -830,7 +849,12 @@ pub const VM = struct {
                         self.registers[result_reg].deinit(self.allocator);
 
                         // Delete file
-                        const success = std.fs.cwd().deleteFile(filename_val.string) catch false;
+                        const success = blk: {
+                            std.fs.cwd().deleteFile(filename_val.string) catch {
+                                break :blk false;
+                            };
+                            break :blk true;
+                        };
                         self.registers[result_reg] = .{ .boolean = success };
                     } else {
                         return error.TypeError;
