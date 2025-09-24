@@ -1,0 +1,107 @@
+-- Example: Control Flow
+-- Purpose: Demonstrate conditionals and loops
+-- Concepts: if/elseif/else, for loops, while loops, logical operators
+
+print("=== Control Flow Examples ===")
+
+-- Conditional statements
+local score = 85
+
+print("\n1. Grade Calculator:")
+if score >= 90 then
+    print("Grade: A - Excellent!")
+elseif score >= 80 then
+    print("Grade: B - Good job!")  -- This will execute
+elseif score >= 70 then
+    print("Grade: C - Satisfactory")
+elseif score >= 60 then
+    print("Grade: D - Needs improvement")
+else
+    print("Grade: F - Please retake")
+end
+
+-- Logical operators
+local age = 25
+local has_license = true
+local has_insurance = true
+
+print("\n2. Driving Eligibility:")
+if age >= 18 && has_license && has_insurance then
+    print("✓ Can drive legally!")
+elseif age >= 16 && has_license then
+    print("⚠ Can drive with restrictions")
+else
+    print("✗ Cannot drive")
+end
+
+-- For loops
+print("\n3. Counting with For Loop:")
+for i = 1, 5, 1 do
+    print("Count:", i)
+end
+
+print("\n4. Countdown:")
+for i = 5, 1, -1 do
+    print("Countdown:", i)
+end
+
+-- While loops
+print("\n5. While Loop Example:")
+local count = 0
+while count < 3 do
+    print("While iteration:", count)
+    count = count + 1
+end
+
+-- Complex conditions
+print("\n6. Weather Decision:")
+local temperature = 75
+local is_sunny = true
+local is_weekend = false
+
+if temperature > 70 && is_sunny then
+    if is_weekend then
+        print("Perfect day for outdoor activities!")
+    else
+        print("Great weather, but it's a workday")
+    end
+elseif temperature > 60 then
+    print("Nice day, maybe take a walk")
+else
+    print("Stay inside, it's cold")
+end
+
+print("\n=== End of Examples ===")
+
+-- Expected output:
+-- === Control Flow Examples ===
+--
+-- 1. Grade Calculator:
+-- Grade: B - Good job!
+--
+-- 2. Driving Eligibility:
+-- ✓ Can drive legally!
+--
+-- 3. Counting with For Loop:
+-- Count: 1
+-- Count: 2
+-- Count: 3
+-- Count: 4
+-- Count: 5
+--
+-- 4. Countdown:
+-- Countdown: 5
+-- Countdown: 4
+-- Countdown: 3
+-- Countdown: 2
+-- Countdown: 1
+--
+-- 5. While Loop Example:
+-- While iteration: 0
+-- While iteration: 1
+-- While iteration: 2
+--
+-- 6. Weather Decision:
+-- Great weather, but it's a workday
+--
+-- === End of Examples ===

@@ -1,0 +1,173 @@
+-- Example Grim Buffer API usage in Ghostlang
+
+-- Buffer manipulation examples
+function demo_buffer_operations()
+    -- Create a new buffer
+    local buffer = new_buffer("example.txt")
+
+    -- Set buffer content
+    local lines = [
+        "function hello_world() {",
+        "    print(\"Hello, World!\")",
+        "    return 42",
+        "}"
+    ]
+
+    buffer.set_lines(0, -1, lines)
+
+    -- Insert a line at position 2
+    buffer.insert_line(2, "    local result = 0")
+
+    -- Get line count
+    local line_count = buffer.line_count()
+    print("Buffer has", line_count, "lines")
+
+    -- Get specific line
+    local first_line = buffer.get_line(0)
+    print("First line:", first_line)
+
+    -- Search and replace
+    buffer.replace_text("hello_world", "main")
+
+    -- Mark as modified
+    buffer.set_modified(true)
+
+    return buffer
+end
+
+-- Cursor operations
+function demo_cursor_operations(buffer)
+    -- Set cursor position
+    buffer.set_cursor(1, 4)  -- line 1, column 4
+
+    -- Get cursor position
+    local line, col = buffer.get_cursor()
+    print("Cursor at line", line, "column", col)
+
+    -- Move cursor
+    buffer.move_cursor(0, 1)  -- move right by 1
+    buffer.move_cursor(1, 0)  -- move down by 1
+
+    -- Select text
+    buffer.start_selection(1, 0)
+    buffer.end_selection(1, 10)
+
+    -- Get selected text
+    local selection = buffer.get_selection()
+    print("Selected:", selection)
+end
+
+-- Text transformation functions
+function to_upper_case(text)
+    -- This would use grim's FFI to call Zig string functions
+    return string_to_upper(text)
+end
+
+function to_lower_case(text)
+    return string_to_lower(text)
+end
+
+function indent_lines(buffer, start_line, end_line)
+    local tab_width = buffer.tab_width or 4
+    local indent = string_repeat(" ", tab_width)
+
+    local i = start_line
+    while i <= end_line do
+        local line = buffer.get_line(i)
+        buffer.set_line(i, indent .. line)
+        i = i + 1
+    end
+end
+
+-- File operations
+function save_buffer(buffer)
+    if buffer.modified then
+        local success = file_write(buffer.name, buffer.get_all_text())
+        if success then
+            buffer.set_modified(false)
+            print("Saved:", buffer.name)
+        else
+            print("Error saving:", buffer.name)
+        end
+    end
+end
+
+function load_file(filename)
+    if file_exists(filename) then
+        local content = file_read(filename)
+        local buffer = new_buffer(filename)
+
+        -- Split content into lines
+        local lines = string_split(content, "\n")
+        buffer.set_lines(0, -1, lines)
+        buffer.set_modified(false)
+
+        return buffer
+    else
+        print("File not found:", filename)
+        return nil
+    end
+end
+
+-- Search functionality
+function find_in_buffer(buffer, pattern, case_sensitive)
+    local matches = []
+    local line_count = buffer.line_count()
+
+    local i = 0
+    while i < line_count do
+        local line = buffer.get_line(i)
+        local match_pos = string_find(line, pattern, case_sensitive)
+
+        if match_pos >= 0 then
+            local match = {
+                line = i,
+                column = match_pos,
+                text = line
+            }
+            array_push(matches, match)
+        end
+
+        i = i + 1
+    end
+
+    return matches
+end
+
+-- Plugin example: auto-indent on newline
+function on_newline(buffer)
+    local cursor_line, cursor_col = buffer.get_cursor()
+    local current_line = buffer.get_line(cursor_line)
+
+    -- Calculate indentation of current line
+    local indent = 0
+    local i = 0
+    while i < string_length(current_line) do
+        local char = string_char_at(current_line, i)
+        if char == " " then
+            indent = indent + 1
+        elseif char == "\t" then
+            indent = indent + buffer.tab_width
+        else
+            break
+        end
+        i = i + 1
+    end
+
+    -- Add extra indent for opening braces
+    if string_ends_with(string_trim(current_line), "{") then
+        indent = indent + buffer.tab_width
+    end
+
+    -- Insert newline with proper indentation
+    local new_line = string_repeat(" ", indent)
+    buffer.insert_text(cursor_line + 1, 0, new_line)
+    buffer.set_cursor(cursor_line + 1, indent)
+end
+
+-- Run the demos
+print("Running buffer API demo...")
+local buffer = demo_buffer_operations()
+demo_cursor_operations(buffer)
+
+print("Buffer demo complete!")

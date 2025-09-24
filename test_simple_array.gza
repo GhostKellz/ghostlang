@@ -1,0 +1,2 @@
+local arr = [10, 20, 30]
+print("Array created:", arr)

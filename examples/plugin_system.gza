@@ -1,0 +1,231 @@
+-- Example Grim Plugin System in Ghostlang
+
+-- Plugin metadata
+local plugin = {
+    name = "auto-formatter",
+    version = "1.0.0",
+    author = "Ghost Dev",
+    description = "Automatic code formatting plugin",
+    dependencies = []
+}
+
+-- Plugin state
+local state = {
+    enabled = true,
+    format_on_save = true,
+    format_on_type = false,
+    supported_languages = ["rust", "zig", "javascript", "python"]
+}
+
+-- Language-specific formatters
+local formatters = {
+    rust = function(code)
+        -- This would call rustfmt via grim's process API
+        return format_rust(code)
+    end,
+
+    zig = function(code)
+        -- This would call zig fmt via grim's process API
+        return format_zig(code)
+    end,
+
+    javascript = function(code)
+        -- This would call prettier via grim's process API
+        return format_javascript(code)
+    end,
+
+    python = function(code)
+        -- This would call black via grim's process API
+        return format_python(code)
+    end
+}
+
+-- Plugin commands
+function format_current_buffer()
+    local buffer = get_current_buffer()
+    local filetype = buffer.filetype
+
+    if not array_contains(state.supported_languages, filetype) then
+        print("Formatting not supported for", filetype)
+        return false
+    end
+
+    local formatter = formatters[filetype]
+    if not formatter then
+        print("No formatter available for", filetype)
+        return false
+    end
+
+    local original_text = buffer.get_all_text()
+    local formatted_text = formatter(original_text)
+
+    if formatted_text ~= original_text then
+        -- Save cursor position
+        local line, col = buffer.get_cursor()
+
+        -- Replace buffer content
+        buffer.set_all_text(formatted_text)
+
+        -- Restore cursor position (approximately)
+        buffer.set_cursor(line, col)
+
+        print("Formatted", buffer.name)
+        return true
+    else
+        print("No formatting changes needed")
+        return false
+    end
+end
+
+function toggle_format_on_save()
+    state.format_on_save = not state.format_on_save
+    print("Format on save:", state.format_on_save)
+end
+
+function toggle_format_on_type()
+    state.format_on_type = not state.format_on_type
+    print("Format on type:", state.format_on_type)
+end
+
+-- Event handlers
+function on_buffer_save(buffer)
+    if state.enabled and state.format_on_save then
+        local old_filetype = buffer.filetype
+        if array_contains(state.supported_languages, old_filetype) then
+            format_current_buffer()
+        end
+    end
+end
+
+function on_text_changed(buffer, line, column, text)
+    if state.enabled and state.format_on_type then
+        -- Only format on specific trigger characters
+        if text == "}" or text == ";" or text == "\n" then
+            local filetype = buffer.filetype
+            if array_contains(state.supported_languages, filetype) then
+                -- Format just the current line or function
+                format_current_scope(buffer, line)
+            end
+        end
+    end
+end
+
+function format_current_scope(buffer, line)
+    -- Find the current function/block scope
+    local start_line = find_scope_start(buffer, line)
+    local end_line = find_scope_end(buffer, line)
+
+    if start_line >= 0 and end_line >= 0 then
+        local lines = []
+        local i = start_line
+        while i <= end_line do
+            array_push(lines, buffer.get_line(i))
+            i = i + 1
+        end
+
+        local scope_text = array_join(lines, "\n")
+        local formatter = formatters[buffer.filetype]
+
+        if formatter then
+            local formatted_scope = formatter(scope_text)
+            local formatted_lines = string_split(formatted_scope, "\n")
+
+            -- Replace the scope
+            buffer.replace_lines(start_line, end_line, formatted_lines)
+        end
+    end
+end
+
+-- Utility functions for scope detection
+function find_scope_start(buffer, line)
+    local i = line
+    local brace_count = 0
+
+    while i >= 0 do
+        local line_text = buffer.get_line(i)
+        local j = string_length(line_text) - 1
+
+        while j >= 0 do
+            local char = string_char_at(line_text, j)
+            if char == "}" then
+                brace_count = brace_count + 1
+            elseif char == "{" then
+                brace_count = brace_count - 1
+                if brace_count < 0 then
+                    return i
+                end
+            end
+            j = j - 1
+        end
+
+        i = i - 1
+    end
+
+    return -1
+end
+
+function find_scope_end(buffer, line)
+    local line_count = buffer.line_count()
+    local i = line
+    local brace_count = 0
+
+    while i < line_count do
+        local line_text = buffer.get_line(i)
+        local j = 0
+
+        while j < string_length(line_text) do
+            local char = string_char_at(line_text, j)
+            if char == "{" then
+                brace_count = brace_count + 1
+            elseif char == "}" then
+                brace_count = brace_count - 1
+                if brace_count < 0 then
+                    return i
+                end
+            end
+            j = j + 1
+        end
+
+        i = i + 1
+    end
+
+    return -1
+end
+
+-- Plugin initialization
+function init()
+    print("Auto-formatter plugin initialized")
+
+    -- Register commands
+    register_command("format", format_current_buffer)
+    register_command("toggle_format_on_save", toggle_format_on_save)
+    register_command("toggle_format_on_type", toggle_format_on_type)
+
+    -- Register event handlers
+    register_event_handler("buffer_save", on_buffer_save)
+    register_event_handler("text_changed", on_text_changed)
+
+    return true
+end
+
+-- Plugin cleanup
+function deinit()
+    print("Auto-formatter plugin deinitialized")
+    return true
+end
+
+-- Export plugin interface
+return {
+    plugin = plugin,
+    init = init,
+    deinit = deinit,
+    commands = {
+        format = format_current_buffer,
+        toggle_format_on_save = toggle_format_on_save,
+        toggle_format_on_type = toggle_format_on_type
+    },
+    events = {
+        buffer_save = on_buffer_save,
+        text_changed = on_text_changed
+    }
+}

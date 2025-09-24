@@ -1,0 +1,45 @@
+-- Test enhanced conditional expressions
+
+local score = 85
+
+if (score >= 90) {
+    print("Grade: A")
+} elseif (score >= 80) {
+    print("Grade: B")
+} elseif (score >= 70) {
+    print("Grade: C")
+} else {
+    print("Grade: F")
+}
+
+-- Test logical operators
+local age = 25
+local has_license = true
+
+if (age >= 18 && has_license) {
+    print("Can drive!")
+} else {
+    print("Cannot drive")
+}
+
+-- Test negation
+local is_raining = false
+if (!is_raining) {
+    print("Good day for a walk!")
+}
+
+-- Test multiple conditions
+local x = 5
+local y = 10
+if (x > 0 && y > 0 && x < y) {
+    print("x is positive and less than y")
+}
+
+-- Test comparison operators
+if (x != y) {
+    print("x is not equal to y")
+}
+
+if (x <= 10) {
+    print("x is at most 10")
+}

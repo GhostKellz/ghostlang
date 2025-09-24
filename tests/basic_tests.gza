@@ -1,0 +1,161 @@
+-- Basic Ghostlang Test Suite
+
+-- Test counter
+local test_count = 0
+local pass_count = 0
+
+function test(name, test_func)
+    test_count = test_count + 1
+    print("Running test:", name)
+
+    local success = test_func()
+    if success then
+        pass_count = pass_count + 1
+        print("  ✓ PASS")
+    else
+        print("  ✗ FAIL")
+    end
+end
+
+function assert_equal(actual, expected)
+    if actual == expected then
+        return true
+    else
+        print("  Expected:", expected, "but got:", actual)
+        return false
+    end
+end
+
+function assert_true(value)
+    if value then
+        return true
+    else
+        print("  Expected true but got:", value)
+        return false
+    end
+end
+
+-- Test basic arithmetic
+test("addition", function()
+    local result = 3 + 4
+    return assert_equal(result, 7)
+end)
+
+test("subtraction", function()
+    local result = 10 - 3
+    return assert_equal(result, 7)
+end)
+
+test("multiplication", function()
+    local result = 6 * 7
+    return assert_equal(result, 42)
+end)
+
+test("division", function()
+    local result = 15 / 3
+    return assert_equal(result, 5)
+end)
+
+-- Test variables
+test("local variables", function()
+    local x = 10
+    local y = 20
+    local sum = x + y
+    return assert_equal(sum, 30)
+end)
+
+test("variable assignment", function()
+    local x = 5
+    x = x * 2
+    return assert_equal(x, 10)
+end)
+
+-- Test arrays
+test("array creation", function()
+    local arr = [1, 2, 3]
+    return assert_true(arr ~= nil)
+end)
+
+test("array access", function()
+    local arr = [10, 20, 30]
+    -- Note: array access would need to be implemented
+    -- For now just test that array was created
+    return assert_true(arr ~= nil)
+end)
+
+-- Test functions
+test("function definition", function()
+    function add(a, b)
+        return a + b
+    end
+
+    local result = add(5, 7)
+    return assert_equal(result, 12)
+end)
+
+-- Test conditionals
+test("if statement true", function()
+    local x = 5
+    local result = 0
+
+    if x > 3 then
+        result = 1
+    end
+
+    return assert_equal(result, 1)
+end)
+
+test("if statement false", function()
+    local x = 2
+    local result = 0
+
+    if x > 3 then
+        result = 1
+    end
+
+    return assert_equal(result, 0)
+end)
+
+-- Test loops
+test("for loop", function()
+    local sum = 0
+    local i = 1
+
+    for i = 1, 5, 1 do
+        sum = sum + i
+    end
+
+    return assert_equal(sum, 15)  -- 1+2+3+4+5 = 15
+end)
+
+test("while loop", function()
+    local sum = 0
+    local i = 1
+
+    while i <= 3 do
+        sum = sum + i
+        i = i + 1
+    end
+
+    return assert_equal(sum, 6)  -- 1+2+3 = 6
+end)
+
+-- Test string operations
+test("string concatenation", function()
+    local str1 = "Hello"
+    local str2 = " World"
+    local result = str1 .. str2
+    return assert_equal(result, "Hello World")
+end)
+
+-- Print final results
+print("\n=== Test Results ===")
+print("Tests run:", test_count)
+print("Tests passed:", pass_count)
+print("Tests failed:", test_count - pass_count)
+
+if pass_count == test_count then
+    print("All tests PASSED! 🎉")
+else
+    print("Some tests FAILED! ❌")
+end

@@ -1,0 +1,107 @@
+-- Example Grim Editor Configuration in Ghostlang
+
+-- Basic editor settings
+local config = {
+    theme = "dark",
+    font_size = 14,
+    tab_width = 4,
+    line_numbers = true,
+    word_wrap = false
+}
+
+-- Key bindings configuration
+local keymaps = {
+    normal = {
+        ["j"] = "cursor_down",
+        ["k"] = "cursor_up",
+        ["h"] = "cursor_left",
+        ["l"] = "cursor_right",
+        ["i"] = "insert_mode",
+        ["a"] = "append_mode",
+        ["o"] = "open_line_below",
+        ["dd"] = "delete_line",
+        ["yy"] = "yank_line",
+        ["p"] = "paste_after",
+        ["P"] = "paste_before",
+        [":"] = "command_mode"
+    },
+    insert = {
+        ["<Esc>"] = "normal_mode",
+        ["<C-c>"] = "normal_mode"
+    }
+}
+
+-- Plugin configuration example
+local plugins = {
+    lsp = {
+        enabled = true,
+        servers = ["rust-analyzer", "zls", "clangd"],
+        auto_format = true
+    },
+    git = {
+        enabled = true,
+        show_blame = false,
+        auto_stage = false
+    },
+    search = {
+        enabled = true,
+        case_sensitive = false,
+        regex = false
+    }
+}
+
+-- Buffer manipulation functions that grim would provide
+function on_buffer_open(buffer)
+    print("Buffer opened:", buffer.name)
+
+    -- Set language-specific settings
+    if buffer.filetype == "rust" then
+        buffer.tab_width = 4
+        buffer.use_spaces = true
+    elseif buffer.filetype == "zig" then
+        buffer.tab_width = 4
+        buffer.use_spaces = true
+    end
+end
+
+function on_key_press(key, mode)
+    local action = keymaps[mode][key]
+    if action then
+        return action
+    end
+    return nil
+end
+
+-- Custom command example
+function grep_project(pattern)
+    local results = []
+    -- This would be implemented by grim's FFI
+    -- file_search(pattern, "**/*.zig", results)
+    return results
+end
+
+-- Status line configuration
+function status_line()
+    local parts = [
+        "Mode: " .. current_mode(),
+        "File: " .. current_buffer().name,
+        "Line: " .. cursor_line(),
+        "Col: " .. cursor_column()
+    ]
+    return parts
+end
+
+-- Export configuration
+return {
+    config = config,
+    keymaps = keymaps,
+    plugins = plugins,
+    hooks = {
+        on_buffer_open = on_buffer_open,
+        on_key_press = on_key_press
+    },
+    commands = {
+        grep = grep_project
+    },
+    status_line = status_line
+}

@@ -1,0 +1,19 @@
+-- Example: Hello World
+-- Purpose: Your first Ghostlang program
+-- Concepts: Basic output, comments, string literals
+
+-- This is a comment
+print("Hello, World!")
+
+-- Variables and string concatenation
+local name = "Ghostlang"
+print("Welcome to " .. name .. "!")
+
+-- Numbers and arithmetic
+local version = 2.0
+print("Version:", version)
+
+-- Expected output:
+-- Hello, World!
+-- Welcome to Ghostlang!
+-- Version: 2

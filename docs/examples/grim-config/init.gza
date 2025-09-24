@@ -1,0 +1,186 @@
+-- Example: Grim Editor Configuration
+-- Purpose: Basic editor configuration using Ghostlang
+-- Concepts: Tables, configuration patterns, editor integration
+
+print("Loading Grim editor configuration...")
+
+-- Basic editor settings
+local config = {
+    -- Display settings
+    line_numbers = true,
+    relative_line_numbers = false,
+    show_whitespace = false,
+    word_wrap = false,
+
+    -- Editing settings
+    tab_width = 4,
+    use_spaces = true,
+    auto_indent = true,
+    auto_save = false,
+
+    -- Window settings
+    split_below = true,
+    split_right = true,
+
+    -- Performance settings
+    undo_levels = 1000,
+    max_memory_mb = 512
+}
+
+-- Theme configuration
+local theme = {
+    name = "dark",
+    background = "#1e1e1e",
+    foreground = "#d4d4d4",
+    cursor = "#ffffff",
+    selection = "#264f78",
+
+    -- Syntax highlighting
+    keywords = "#569cd6",
+    strings = "#ce9178",
+    comments = "#6a9955",
+    numbers = "#b5cea8",
+    functions = "#dcdcaa"
+}
+
+-- Apply basic configuration
+print("Applying editor settings...")
+for key, value in pairs(config) do
+    -- In real Grim integration, this would call:
+    -- set_option(key, value)
+    print("Setting " .. key .. " = " .. tostring(value))
+end
+
+-- Apply theme
+print("\nApplying theme: " .. theme.name)
+for key, value in pairs(theme) do
+    if key != "name" then
+        -- In real Grim integration:
+        -- set_color(key, value)
+        print("Color " .. key .. " = " .. value)
+    end
+end
+
+-- File type specific settings
+local filetypes = {
+    zig = {
+        tab_width = 4,
+        max_line_length = 100,
+        auto_format = true
+    },
+
+    lua = {
+        tab_width = 2,
+        max_line_length = 120,
+        auto_format = false
+    },
+
+    markdown = {
+        word_wrap = true,
+        spell_check = true,
+        tab_width = 2
+    }
+}
+
+-- Apply filetype settings
+print("\nConfiguring file types:")
+for filetype, settings in pairs(filetypes) do
+    print("Filetype: " .. filetype)
+    for setting, value in pairs(settings) do
+        print("  " .. setting .. " = " .. tostring(value))
+    end
+end
+
+-- Status line configuration
+function configure_status_line()
+    local status_components = [
+        "mode",           -- Current mode (NORMAL, INSERT, etc.)
+        "filename",       -- Current file name
+        "modified",       -- File modification indicator
+        "line_info",      -- Line and column numbers
+        "filetype",       -- Current file type
+        "encoding"        -- File encoding
+    ]
+
+    print("\nStatus line components:")
+    for component in status_components do
+        print("  • " .. component)
+    end
+
+    return status_components
+end
+
+configure_status_line()
+
+-- Load additional configuration modules
+print("\nLoading additional configuration:")
+
+-- Keybindings
+print("• Loading keybindings.gza")
+-- require("keybindings")
+
+-- Plugins
+print("• Loading plugins")
+-- require("plugins/init")
+
+-- Custom commands
+print("• Registering custom commands")
+-- require("commands")
+
+print("\n✓ Grim configuration loaded successfully!")
+
+-- Expected output:
+-- Loading Grim editor configuration...
+-- Applying editor settings...
+-- Setting line_numbers = true
+-- Setting relative_line_numbers = false
+-- Setting show_whitespace = false
+-- Setting word_wrap = false
+-- Setting tab_width = 4
+-- Setting use_spaces = true
+-- Setting auto_indent = true
+-- Setting auto_save = false
+-- Setting split_below = true
+-- Setting split_right = true
+-- Setting undo_levels = 1000
+-- Setting max_memory_mb = 512
+--
+-- Applying theme: dark
+-- Color background = #1e1e1e
+-- Color foreground = #d4d4d4
+-- Color cursor = #ffffff
+-- Color selection = #264f78
+-- Color keywords = #569cd6
+-- Color strings = #ce9178
+-- Color comments = #6a9955
+-- Color numbers = #b5cea8
+-- Color functions = #dcdcaa
+--
+-- Configuring file types:
+-- Filetype: zig
+--   tab_width = 4
+--   max_line_length = 100
+--   auto_format = true
+-- Filetype: lua
+--   tab_width = 2
+--   max_line_length = 120
+--   auto_format = false
+-- Filetype: markdown
+--   word_wrap = true
+--   spell_check = true
+--   tab_width = 2
+--
+-- Status line components:
+--   • mode
+--   • filename
+--   • modified
+--   • line_info
+--   • filetype
+--   • encoding
+--
+-- Loading additional configuration:
+-- • Loading keybindings.gza
+-- • Loading plugins
+-- • Registering custom commands
+--
+-- ✓ Grim configuration loaded successfully!
