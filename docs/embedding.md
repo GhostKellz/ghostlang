@@ -1,6 +1,6 @@
 # Embedding Ghostlang
 
-Ghostlang is designed to be easily embedded in Zig applications. This guide shows how to integrate ghostlang into your project.
+Ghostlang is built first and foremost as an embeddable scripting engine for Zig applications. The runtime is still early, but the public API is already stable enough for experiments. This guide shows the minimal wiring required to run scripts and exchange data with host functions.
 
 ## Adding as a Dependency
 
@@ -65,35 +65,31 @@ fn myPrintFunc(args: []const ghostlang.ScriptValue) ghostlang.ScriptValue {
 
 ## Configuration
 
-Customize the engine with `EngineConfig`:
+`EngineConfig` currently exposes future-facing knobs (memory limits, execution timeouts, capability flags). In the current build only the allocator is honoured; limit enforcement is on the roadmap. You can still set the fields today to document intent:
 
 ```zig
 const config = ghostlang.EngineConfig{
     .allocator = allocator,
-    .memory_limit = 2 * 1024 * 1024, // 2MB
-    .execution_timeout_ms = 5000,    // 5 seconds
-    .allow_io = true,                // Allow file I/O
+    .memory_limit = 2 * 1024 * 1024, // TODO: enforcement
+    .execution_timeout_ms = 1000,     // TODO: enforcement
+    .allow_io = false,                // TODO: enforcement
 };
 ```
 
 ## Calling Script Functions
 
+`ScriptEngine.call` is stubbed while we bring the parser and VM up to parity. For the moment, treat Zig → script calls as a planned feature. The recommended pattern is to load scripts that return a value or mutate shared globals, then read those globals via `Script.getGlobal`.
+
 ```zig
-// Assuming script defines a function 'add'
-const result = try engine.call("add", .{3, 4});
-std.debug.print("3 + 4 = {}\n", .{result.number});
+var script = try engine.loadScript("var total = sum(1, 2, 3); total");
+defer script.deinit();
+const result = try script.run();
+if (result == .number) {
+    std.debug.print("total = {}\n", .{result.number});
+}
 ```
 
-## Sandboxing
-
-Ghostlang provides sandboxing features:
-
-- Memory limits prevent excessive memory usage
-- Execution timeouts prevent infinite loops
-- I/O and syscall restrictions for security
-- Deterministic mode for reproducible execution
-
-Enable these in `EngineConfig` as needed for your use case.
+Once the function-call surface lands, this section will be expanded with concrete examples.
 
 ## Error Handling
 
@@ -112,9 +108,11 @@ const result = script.run() catch |err| {
 };
 ```
 
-## Performance Tips
+## What’s Next
 
-- Reuse `ScriptEngine` instances when possible
-- Use memory pools for frequent allocations
-- Enable JIT when available for performance-critical code
-- Profile memory usage and adjust limits accordingly
+- Enforce `EngineConfig` limits and capabilities
+- Finish `ScriptEngine.call`
+- Add deep-copy semantics for tables/strings when crossing the boundary
+- Publish a standard library surface for host ↔ script data exchange
+
+Track `ROADMAP.md` for the latest status on these tasks.

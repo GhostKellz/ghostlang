@@ -1,0 +1,168 @@
+====================================
+Variable declaration
+====================================
+
+var x = 5;
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (number_literal)))
+
+====================================
+Function declaration
+====================================
+
+function greet(name) {
+    return "Hello " + name;
+}
+
+---
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list (identifier))
+    body: (block_statement
+      (return_statement
+        (additive_expression
+          (string_literal)
+          (identifier))))))
+
+====================================
+If statement
+====================================
+
+if (x > 0) {
+    notify("Positive");
+} else {
+    notify("Not positive");
+}
+
+---
+
+(source_file
+  (if_statement
+    condition: (relational_expression
+      (identifier)
+      (number_literal))
+    then: (block_statement
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          arguments: (argument_list (string_literal)))))
+    else: (block_statement
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          arguments: (argument_list (string_literal)))))))
+
+====================================
+Editor API calls
+====================================
+
+var line = getCurrentLine();
+setLineText(line, "New content");
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (call_expression
+      function: (identifier)
+      arguments: (argument_list)))
+  (expression_statement
+    (call_expression
+      function: (identifier)
+      arguments: (argument_list
+        (identifier)
+        (string_literal)))))
+
+====================================
+Object literal
+====================================
+
+var config = {
+    theme: "dark",
+    fontSize: 14,
+    enabled: true
+};
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (object_literal
+      (object_member (identifier) (string_literal))
+      (object_member (identifier) (number_literal))
+      (object_member (identifier) (boolean_literal)))))
+
+====================================
+Array literal and loops
+====================================
+
+var items = [1, 2, 3];
+for (var i = 0; i < items.length; i++) {
+    log(items[i]);
+}
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (array_literal
+      (number_literal)
+      (number_literal)
+      (number_literal)))
+  (for_statement
+    init: (variable_declaration
+      name: (identifier)
+      value: (number_literal))
+    condition: (relational_expression
+      (identifier)
+      (member_expression
+        object: (identifier)
+        property: (identifier)))
+    update: (assignment_expression
+      left: (identifier)
+      operator: (string)
+      right: (additive_expression
+        (identifier)
+        (number_literal)))
+    body: (block_statement
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          arguments: (argument_list
+            (subscript_expression
+              object: (identifier)
+              index: (identifier))))))))
+
+====================================
+Comments
+====================================
+
+// Single line comment
+function test() {
+    /* Multi-line
+       comment */
+    var x = 5;
+}
+
+---
+
+(source_file
+  (comment)
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (block_statement
+      (comment)
+      (variable_declaration
+        name: (identifier)
+        value: (number_literal)))))

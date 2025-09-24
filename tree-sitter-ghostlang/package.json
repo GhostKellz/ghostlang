@@ -1,0 +1,41 @@
+{
+  "name": "tree-sitter-ghostlang",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for Ghostlang scripting language",
+  "main": "bindings/node",
+  "keywords": [
+    "tree-sitter",
+    "ghostlang",
+    "grim",
+    "editor",
+    "scripting",
+    "parsing"
+  ],
+  "author": "Ghostlang Contributors",
+  "license": "MIT",
+  "dependencies": {
+    "nan": "^2.14.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.20.6"
+  },
+  "scripts": {
+    "build": "tree-sitter generate && node-gyp build",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.ghostlang",
+      "file-types": ["ghost"],
+      "highlights": "queries/highlights.scm",
+      "locals": "queries/locals.scm",
+      "injections": "queries/injections.scm",
+      "textobjects": "queries/textobjects.scm"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ghostlang/tree-sitter-ghostlang.git"
+  }
+}

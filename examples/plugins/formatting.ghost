@@ -1,0 +1,297 @@
+// formatting.ghost - Code formatting and styling operations
+// Demonstrates formatting APIs that editors commonly need
+
+// Example 1: Auto-format document
+function formatDocument() {
+    var language = getFileLanguage();
+    var formatter = getFormatter(language);
+
+    if (!formatter) {
+        notify("No formatter available for " + language);
+        return;
+    }
+
+    var content = getAllText();
+    var formatted = formatter.format(content);
+
+    if (formatted != content) {
+        replaceAllText(formatted);
+        notify("Document formatted");
+    } else {
+        notify("Document already formatted");
+    }
+}
+
+// Example 2: Fix indentation
+function fixIndentation() {
+    var language = getFileLanguage();
+    var indentSize = getIndentSize(language);
+    var useSpaces = getUseSpaces(language);
+
+    var lines = getAllLines();
+    var modified = false;
+
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        var newLine = fixLineIndentation(line, indentSize, useSpaces);
+
+        if (newLine != line) {
+            setLineText(i, newLine);
+            modified = true;
+        }
+    }
+
+    if (modified) {
+        notify("Indentation fixed");
+    }
+}
+
+// Example 3: Sort imports/includes
+function sortImports() {
+    var language = getFileLanguage();
+    var importPattern = getImportPattern(language);
+
+    var lines = getAllLines();
+    var imports = [];
+    var importIndices = [];
+
+    // Find all import lines
+    for (var i = 0; i < lines.length; i++) {
+        if (matchesPattern(lines[i], importPattern)) {
+            imports.append(lines[i]);
+            importIndices.append(i);
+        }
+    }
+
+    if (imports.length == 0) {
+        notify("No imports found");
+        return;
+    }
+
+    // Sort imports
+    var sortedImports = sortImportLines(imports, language);
+
+    // Replace import lines
+    for (var i = 0; i < importIndices.length; i++) {
+        setLineText(importIndices[i], sortedImports[i]);
+    }
+
+    notify("Imports sorted");
+}
+
+// Example 4: Remove trailing whitespace
+function removeTrailingWhitespace() {
+    var lines = getAllLines();
+    var modified = false;
+
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        var trimmed = rtrim(line);
+
+        if (trimmed != line) {
+            setLineText(i, trimmed);
+            modified = true;
+        }
+    }
+
+    if (modified) {
+        notify("Trailing whitespace removed");
+    }
+}
+
+// Example 5: Add/remove blank lines
+function normalizeBlankLines() {
+    var lines = getAllLines();
+    var result = [];
+    var lastWasBlank = false;
+
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        var isBlank = trim(line) == "";
+
+        if (isBlank) {
+            if (!lastWasBlank) {
+                result.append(line);
+            }
+            lastWasBlank = true;
+        } else {
+            result.append(line);
+            lastWasBlank = false;
+        }
+    }
+
+    // Replace all text with normalized version
+    var newText = join(result, "\n");
+    replaceAllText(newText);
+    notify("Blank lines normalized");
+}
+
+// Example 6: Wrap long lines
+function wrapLongLines() {
+    var maxLength = getWrapColumn();
+    var lines = getAllLines();
+    var modified = false;
+
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+
+        if (line.length > maxLength) {
+            var wrapped = wrapLine(line, maxLength);
+            if (wrapped.length > 1) {
+                // Replace single line with multiple wrapped lines
+                deleteLine(i);
+                for (var j = 0; j < wrapped.length; j++) {
+                    insertLine(i + j, wrapped[j]);
+                }
+                i = i + wrapped.length - 1; // Adjust loop counter
+                modified = true;
+            }
+        }
+    }
+
+    if (modified) {
+        notify("Long lines wrapped");
+    }
+}
+
+// Utility functions for formatting
+function fixLineIndentation(line, indentSize, useSpaces) {
+    var content = ltrim(line);
+    var currentIndent = line.length - content.length;
+
+    // Convert tabs to spaces or vice versa
+    var indentLevel = 0;
+    for (var i = 0; i < currentIndent; i++) {
+        if (line[i] == '\t') {
+            indentLevel = indentLevel + indentSize;
+        } else {
+            indentLevel = indentLevel + 1;
+        }
+    }
+
+    // Create proper indentation
+    var newIndent = "";
+    if (useSpaces) {
+        for (var i = 0; i < indentLevel; i++) {
+            newIndent = newIndent + " ";
+        }
+    } else {
+        var tabs = indentLevel / indentSize;
+        var spaces = indentLevel % indentSize;
+        for (var i = 0; i < tabs; i++) {
+            newIndent = newIndent + "\t";
+        }
+        for (var i = 0; i < spaces; i++) {
+            newIndent = newIndent + " ";
+        }
+    }
+
+    return newIndent + content;
+}
+
+function getImportPattern(language) {
+    if (language == "zig") {
+        return "^\\s*const\\s+\\w+\\s*=\\s*@import";
+    } else if (language == "c" || language == "cpp") {
+        return "^\\s*#include";
+    } else if (language == "python") {
+        return "^\\s*(import\\s+|from\\s+\\w+\\s+import)";
+    } else if (language == "javascript") {
+        return "^\\s*(import\\s+|const\\s+.+\\s*=\\s*require)";
+    }
+    return "^\\s*import\\s+";
+}
+
+function sortImportLines(imports, language) {
+    if (language == "python") {
+        return sortPythonImports(imports);
+    } else if (language == "zig") {
+        return sortZigImports(imports);
+    } else {
+        // Generic alphabetical sort
+        return sort(imports);
+    }
+}
+
+function sortPythonImports(imports) {
+    var standardLib = [];
+    var thirdParty = [];
+    var local = [];
+
+    for (var i = 0; i < imports.length; i++) {
+        var imp = imports[i];
+        if (startsWith(imp, "from __future__") || isStandardLibrary(imp)) {
+            standardLib.append(imp);
+        } else if (startsWith(imp, "from .") || startsWith(imp, "import .")) {
+            local.append(imp);
+        } else {
+            thirdParty.append(imp);
+        }
+    }
+
+    var result = [];
+    result.extend(sort(standardLib));
+    if (thirdParty.length > 0) {
+        result.append(""); // Blank line separator
+        result.extend(sort(thirdParty));
+    }
+    if (local.length > 0) {
+        result.append(""); // Blank line separator
+        result.extend(sort(local));
+    }
+
+    return result;
+}
+
+function sortZigImports(imports) {
+    // Sort Zig imports alphabetically by import name
+    return sort(imports);
+}
+
+function wrapLine(line, maxLength) {
+    if (line.length <= maxLength) {
+        return [line];
+    }
+
+    var result = [];
+    var current = "";
+    var words = split(line, " ");
+
+    for (var i = 0; i < words.length; i++) {
+        var word = words[i];
+        var testLine = current ? current + " " + word : word;
+
+        if (testLine.length > maxLength && current != "") {
+            result.append(current);
+            current = word;
+        } else {
+            current = testLine;
+        }
+    }
+
+    if (current != "") {
+        result.append(current);
+    }
+
+    return result;
+}
+
+function getIndentSize(language) {
+    if (language == "python") {
+        return 4;
+    } else if (language == "zig" || language == "c" || language == "cpp") {
+        return 4;
+    } else if (language == "javascript") {
+        return 2;
+    }
+    return 4;
+}
+
+function getUseSpaces(language) {
+    // Most languages prefer spaces over tabs
+    return language != "makefile";
+}
+
+function getWrapColumn() {
+    return 80; // Standard wrap column
+}

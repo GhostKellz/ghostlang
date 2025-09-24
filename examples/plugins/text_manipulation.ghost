@@ -1,0 +1,127 @@
+// text_manipulation.ghost - Common text editing operations
+// This demonstrates the basic text manipulation APIs that Grim needs
+
+// Example 1: Smart line duplication
+function duplicateLine() {
+    var currentLine = getCurrentLine();
+    var lineText = getLineText(currentLine);
+    insertLine(currentLine + 1, lineText);
+    moveCursor(currentLine + 1, 0);
+}
+
+// Example 2: Toggle line comments (language-aware)
+function toggleLineComment() {
+    var lang = getFileLanguage();
+    var commentPrefix = getCommentPrefix(lang);
+
+    var line = getCurrentLine();
+    var text = getLineText(line);
+
+    if (startsWith(text, commentPrefix)) {
+        // Remove comment
+        var newText = substring(text, commentPrefix.length);
+        setLineText(line, newText);
+    } else {
+        // Add comment
+        setLineText(line, commentPrefix + text);
+    }
+}
+
+// Example 3: Smart indentation
+function autoIndent() {
+    var currentLine = getCurrentLine();
+    var prevLine = currentLine - 1;
+
+    if (prevLine >= 0) {
+        var prevText = getLineText(prevLine);
+        var indentLevel = getIndentLevel(prevText);
+
+        // Increase indent after opening braces
+        if (endsWith(prevText, "{")) {
+            indentLevel = indentLevel + 1;
+        }
+
+        var indent = createIndent(indentLevel);
+        insertText(indent);
+    }
+}
+
+// Example 4: Word manipulation
+function uppercaseWord() {
+    var selection = getSelection();
+    if (selection.isEmpty) {
+        selectWord();
+        selection = getSelection();
+    }
+
+    var text = getSelectedText();
+    var upperText = uppercase(text);
+    replaceSelection(upperText);
+}
+
+// Example 5: Multi-cursor editing simulation
+function addCursorBelow() {
+    var cursors = getCursors();
+    var newCursors = [];
+
+    for (var i = 0; i < cursors.length; i++) {
+        var cursor = cursors[i];
+        newCursors.append(cursor);
+
+        // Add cursor one line below
+        if (cursor.line + 1 < getLineCount()) {
+            var newCursor = {
+                line: cursor.line + 1,
+                column: cursor.column
+            };
+            newCursors.append(newCursor);
+        }
+    }
+
+    setCursors(newCursors);
+}
+
+// Utility functions that would be provided by the Grim API
+function getCommentPrefix(language) {
+    if (language == "zig" || language == "c" || language == "cpp") {
+        return "// ";
+    } else if (language == "python" || language == "shell") {
+        return "# ";
+    } else if (language == "lua") {
+        return "-- ";
+    }
+    return "// ";
+}
+
+function getIndentLevel(text) {
+    var level = 0;
+    for (var i = 0; i < text.length; i++) {
+        if (text[i] == ' ') {
+            level = level + 1;
+        } else if (text[i] == '\t') {
+            level = level + 4; // Assuming tab = 4 spaces
+        } else {
+            break;
+        }
+    }
+    return level / 4; // Assuming 4-space indentation
+}
+
+function createIndent(level) {
+    var indent = "";
+    for (var i = 0; i < level; i++) {
+        indent = indent + "    "; // 4 spaces per level
+    }
+    return indent;
+}
+
+function startsWith(str, prefix) {
+    if (str.length < prefix.length) return false;
+    return substring(str, 0, prefix.length) == prefix;
+}
+
+function endsWith(str, suffix) {
+    if (str.length < suffix.length) return false;
+    var start = str.length - suffix.length;
+    return substring(str, start) == suffix;
+}

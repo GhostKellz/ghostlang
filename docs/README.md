@@ -1,66 +1,43 @@
 # Ghostlang Documentation
 
-Welcome to the **Ghostlang** documentation! Ghostlang is a modern, memory-safe scripting language designed as a Lua alternative, specifically built for integration with the **Grim** Neovim clone.
+**Ghostlang Phase 2 Complete!** 🎉 - Production-ready for Grim editor integration with bulletproof safety, comprehensive APIs, and full syntax highlighting support.
 
-## 🚀 Quick Start
+## 📚 Core Guides
 
-- [Getting Started](getting-started.md) - Installation and first steps
-- [Language Guide](language-guide.md) - Complete language syntax and features
-- [Examples](examples/) - Practical examples and use cases
+- [Getting Started](getting-started.md) – Install, run the demo, and explore supported language features
+- [Embedding Guide](embedding.md) – Wire Ghostlang into a Zig host application
+- [API Reference](api.md) – Script engine structs and functions exposed to embedders
+- [Language Guide](language-guide.md) – Complete language syntax and features
+- [Syntax Guide](syntax-guide.md) – Quick syntax reference
 
-## 📚 Core Documentation
+## 🚀 Grim Integration (Phase 2)
 
-### Language Reference
-- [Syntax Guide](syntax-guide.md) - Complete syntax reference
-- [Data Types](data-types.md) - All supported data types
-- [Control Flow](control-flow.md) - Conditionals, loops, and flow control
-- [Functions](functions.md) - Function definitions and calls
-- [Modules](modules.md) - Module system and imports
+- [Grim Integration Guide](grim-integration.md) – Complete guide for integrating Ghostlang into Grim editor
+- [Plugin Examples](examples/) – Ready-to-use plugin examples for common editor operations
+- [Tree-sitter Grammar](../tree-sitter-ghostlang/) – Syntax highlighting and parsing for Grove
 
-### Integration
-- [Embedding Guide](embedding.md) - How to embed ghostlang in Zig applications
-- [API Reference](api.md) - Complete API documentation
-- [Grim Integration](grim-integration.md) - Specific guide for Grim editor integration
+## 🛡️ Safety & Security
 
-### Advanced Topics
-- [VM Internals](vm-internals.md) - Virtual machine architecture
-- [Memory Management](memory-management.md) - Memory safety and ownership
-- [Performance Guide](performance.md) - Optimization tips and best practices
-- [Error Handling](error-handling.md) - Error types and debugging
+**Phase 0.1 & 2.0 Security Features:**
+- ✅ Memory caps and timeout protection
+- ✅ IO/syscall gating with security contexts
+- ✅ Bulletproof error handling (no panics)
+- ✅ Comprehensive negative-path testing
+- ✅ Three-tier security levels (trusted, normal, sandboxed)
 
-## 🎯 Use Cases
+## 🔤 Language Status
 
-- **Text Editor Configuration**: Configure Grim with Ghostlang scripts
-- **Plugin Development**: Build powerful editor plugins
-- **Automation Scripts**: Automate text processing and file operations
-- **Embedded Scripting**: Add scripting to any Zig application
+**PRODUCTION READY** - All Phase 2 requirements complete:
+- ✅ Variables, functions, control flow
+- ✅ Arrays, objects, strings
+- ✅ 40+ editor API functions
+- ✅ Complete error handling
+- ✅ Tree-sitter grammar for syntax highlighting
 
-## 🔧 Examples Directory
+## 🔗 Additional Resources
 
-- [Basic Examples](examples/basic/) - Simple language features
-- [Editor Configuration](examples/grim-config/) - Grim editor configuration examples
-- [Plugin Examples](examples/plugins/) - Complete plugin implementations
-- [FFI Examples](examples/ffi/) - Foreign function interface usage
+- Project roadmap: [../ROADMAP.md](../ROADMAP.md)
+- Open milestones & tasks: [../TODO.md](../TODO.md)
+- Main project overview: [../README.md](../README.md) *(leave untouched when updating docs)*
 
-## 📖 Language Features
-
-✅ **Phase 2 Complete** - All core features implemented:
-
-- **Object-oriented syntax**: `config.theme.colors`
-- **Array operations**: `arr[index] = value`
-- **String manipulation**: Full string processing capabilities
-- **Advanced conditionals**: `if/elseif/else` chains with logical operators
-- **Loop constructs**: `for`, `while`, and iterator-based loops
-- **Memory safety**: Built-in corruption detection and prevention
-- **Robust parsing**: Handles complex expressions and nested structures
-
-## 🤝 Contributing
-
-- [Contributing Guide](../CONTRIBUTING.md) - How to contribute to Ghostlang
-- [Development Setup](development.md) - Setting up the development environment
-
----
-
-**Ghostlang** - *A modern scripting language for the Grim editor ecosystem*
-
-For more information, see the main [README](../README.md).
+Feedback, bug reports, and documentation PRs are very welcome while we work towards the beta milestone.

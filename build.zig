@@ -142,6 +142,42 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
 
+    // Safety demo executable
+    const safety_demo = b.addExecutable(.{
+        .name = "safety_demo",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("safety_demo_simple.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ghostlang", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(safety_demo);
+
+    const run_safety_demo_cmd = b.addRunArtifact(safety_demo);
+    const run_safety_demo = b.step("safety-demo", "Run the safety demonstration");
+    run_safety_demo.dependOn(&run_safety_demo_cmd.step);
+
+    // Phase 2 integration test
+    const phase2_test = b.addExecutable(.{
+        .name = "phase2_test",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/complete_plugin_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ghostlang", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(phase2_test);
+
+    const run_phase2_cmd = b.addRunArtifact(phase2_test);
+    const run_phase2 = b.step("phase2-test", "Run Phase 2 integration test");
+    run_phase2.dependOn(&run_phase2_cmd.step);
+
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
     // The Zig build system is entirely implemented in userland, which means

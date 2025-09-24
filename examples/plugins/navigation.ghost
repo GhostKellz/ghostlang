@@ -1,0 +1,220 @@
+// navigation.ghost - Editor navigation and search operations
+// Demonstrates navigation APIs that Grim needs for plugin development
+
+// Example 1: Go to matching bracket
+function goToMatchingBracket() {
+    var cursor = getCursorPosition();
+    var char = getCharAt(cursor.line, cursor.column);
+
+    var pairs = {
+        "(": ")",
+        "[": "]",
+        "{": "}",
+        ")": "(",
+        "]": "[",
+        "}": "{"
+    };
+
+    var target = pairs[char];
+    if (!target) return;
+
+    var isOpening = char == "(" || char == "[" || char == "{";
+    var direction = isOpening ? 1 : -1;
+    var matchPos = findMatchingBracket(cursor, char, target, direction);
+
+    if (matchPos) {
+        setCursorPosition(matchPos.line, matchPos.column);
+    }
+}
+
+// Example 2: Smart word navigation
+function jumpToNextWord() {
+    var cursor = getCursorPosition();
+    var line = getLineText(cursor.line);
+
+    // Skip current word
+    var pos = cursor.column;
+    while (pos < line.length && isWordChar(line[pos])) {
+        pos = pos + 1;
+    }
+
+    // Skip whitespace
+    while (pos < line.length && isWhitespace(line[pos])) {
+        pos = pos + 1;
+    }
+
+    if (pos >= line.length) {
+        // Move to next line
+        if (cursor.line + 1 < getLineCount()) {
+            setCursorPosition(cursor.line + 1, 0);
+        }
+    } else {
+        setCursorPosition(cursor.line, pos);
+    }
+}
+
+// Example 3: Function/method jumping
+function jumpToFunction() {
+    var language = getFileLanguage();
+    var pattern = getFunctionPattern(language);
+
+    var lines = getAllLines();
+    var matches = [];
+
+    for (var i = 0; i < lines.length; i++) {
+        if (matchesPattern(lines[i], pattern)) {
+            matches.append({
+                line: i,
+                text: lines[i].trim(),
+                type: "function"
+            });
+        }
+    }
+
+    if (matches.length > 0) {
+        // Show picker for function selection
+        showQuickPick(matches, onFunctionSelected);
+    }
+}
+
+function onFunctionSelected(item) {
+    setCursorPosition(item.line, 0);
+    centerView();
+}
+
+// Example 4: Smart search and replace
+function searchAndReplace() {
+    var searchTerm = prompt("Search for:");
+    if (!searchTerm) return;
+
+    var replaceTerm = prompt("Replace with:");
+    if (replaceTerm == null) return; // Allow empty replacement
+
+    var matches = findAll(searchTerm);
+    var confirmAll = false;
+
+    for (var i = 0; i < matches.length; i++) {
+        var match = matches[i];
+        setCursorPosition(match.line, match.column);
+        highlightRange(match.line, match.column, match.length);
+
+        var action = "replace";
+        if (!confirmAll) {
+            action = promptChoice("Replace this occurrence?",
+                ["replace", "skip", "replaceAll", "cancel"]);
+        }
+
+        if (action == "cancel") {
+            break;
+        } else if (action == "replaceAll") {
+            confirmAll = true;
+            action = "replace";
+        }
+
+        if (action == "replace") {
+            replaceRange(match.line, match.column, match.length, replaceTerm);
+        }
+    }
+
+    clearHighlights();
+}
+
+// Example 5: Bookmark navigation
+function toggleBookmark() {
+    var line = getCurrentLine();
+    if (isBookmarked(line)) {
+        removeBookmark(line);
+    } else {
+        addBookmark(line);
+    }
+    refreshGutter();
+}
+
+function jumpToNextBookmark() {
+    var currentLine = getCurrentLine();
+    var bookmarks = getBookmarks();
+
+    // Find next bookmark after current line
+    for (var i = 0; i < bookmarks.length; i++) {
+        if (bookmarks[i] > currentLine) {
+            setCursorPosition(bookmarks[i], 0);
+            return;
+        }
+    }
+
+    // Wrap to first bookmark if no bookmark found after current line
+    if (bookmarks.length > 0) {
+        setCursorPosition(bookmarks[0], 0);
+    }
+}
+
+// Utility functions for navigation
+function findMatchingBracket(startPos, openChar, closeChar, direction) {
+    var level = 1;
+    var line = startPos.line;
+    var col = startPos.column + direction;
+
+    while (line >= 0 && line < getLineCount()) {
+        var lineText = getLineText(line);
+
+        if (direction > 0) {
+            // Search forward
+            for (var i = col; i < lineText.length; i++) {
+                var c = lineText[i];
+                if (c == openChar) {
+                    level = level + 1;
+                } else if (c == closeChar) {
+                    level = level - 1;
+                    if (level == 0) {
+                        return {line: line, column: i};
+                    }
+                }
+            }
+            line = line + 1;
+            col = 0;
+        } else {
+            // Search backward
+            for (var i = col; i >= 0; i--) {
+                var c = lineText[i];
+                if (c == closeChar) {
+                    level = level + 1;
+                } else if (c == openChar) {
+                    level = level - 1;
+                    if (level == 0) {
+                        return {line: line, column: i};
+                    }
+                }
+            }
+            line = line - 1;
+            if (line >= 0) {
+                col = getLineText(line).length - 1;
+            }
+        }
+    }
+
+    return null; // No match found
+}
+
+function getFunctionPattern(language) {
+    if (language == "zig") {
+        return "^\\s*(pub\\s+)?fn\\s+\\w+";
+    } else if (language == "c" || language == "cpp") {
+        return "^\\s*\\w+\\s+\\w+\\s*\\(";
+    } else if (language == "python") {
+        return "^\\s*def\\s+\\w+";
+    } else if (language == "javascript") {
+        return "^\\s*(function\\s+\\w+|\\w+\\s*=\\s*function)";
+    }
+    return "^\\s*function\\s+\\w+"; // Generic pattern
+}
+
+function isWordChar(c) {
+    return (c >= 'a' && c <= 'z') ||
+           (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') ||
+           c == '_';
+}
+
+function isWhitespace(c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
