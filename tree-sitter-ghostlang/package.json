@@ -27,7 +27,7 @@
   "tree-sitter": [
     {
       "scope": "source.ghostlang",
-      "file-types": ["ghost"],
+      "file-types": ["gza", "ghost"],
       "highlights": "queries/highlights.scm",
       "locals": "queries/locals.scm",
       "injections": "queries/injections.scm",

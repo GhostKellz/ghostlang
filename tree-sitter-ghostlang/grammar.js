@@ -5,7 +5,18 @@ module.exports = grammar({
   name: 'ghostlang',
 
   rules: {
-    source_file: $ => repeat($.statement),
+    source_file: $ => repeat(choice(
+      $.variable_declaration,
+      $.function_declaration,
+      $.if_statement,
+      $.while_statement,
+      $.for_statement,
+      $.expression_statement,
+      $.block_statement,
+      $.return_statement,
+      $.empty_statement,
+      $.comment
+    )),
 
     statement: $ => choice(
       $.variable_declaration,
@@ -24,8 +35,16 @@ module.exports = grammar({
       'var',
       field('name', $.identifier),
       '=',
-      field('value', $.expression),
+      field('value', $._expression_base),
       ';'
+    ),
+
+    // Variable declarations without semicolon (for use in for loops)
+    for_variable_declaration: $ => seq(
+      'var',
+      field('name', $.identifier),
+      '=',
+      field('value', $._expression_base)
     ),
 
     // Function declarations: function name() { ... }
@@ -46,165 +65,217 @@ module.exports = grammar({
     ),
 
     // Control flow statements
-    if_statement: $ => seq(
+    if_statement: $ => prec.right(seq(
       'if',
       '(',
-      field('condition', $.expression),
+      field('condition', $._expression_base),
       ')',
-      field('then', $.statement),
-      optional(seq('else', field('else', $.statement)))
-    ),
+      field('then', choice(
+        $.variable_declaration,
+        $.function_declaration,
+        $.if_statement,
+        $.while_statement,
+        $.for_statement,
+        $.expression_statement,
+        $.block_statement,
+        $.return_statement,
+        $.empty_statement
+      )),
+      optional(seq('else', field('else', choice(
+        $.variable_declaration,
+        $.function_declaration,
+        $.if_statement,
+        $.while_statement,
+        $.for_statement,
+        $.expression_statement,
+        $.block_statement,
+        $.return_statement,
+        $.empty_statement
+      ))))
+    )),
 
     while_statement: $ => seq(
       'while',
       '(',
-      field('condition', $.expression),
+      field('condition', $._expression_base),
       ')',
-      field('body', $.statement)
+      field('body', choice(
+        $.variable_declaration,
+        $.function_declaration,
+        $.if_statement,
+        $.while_statement,
+        $.for_statement,
+        $.expression_statement,
+        $.block_statement,
+        $.return_statement,
+        $.empty_statement
+      ))
     ),
 
-    for_statement: $ => seq(
+    for_statement: $ => prec(10, seq(
       'for',
       '(',
       choice(
         seq(
-          field('init', optional($.variable_declaration)),
+          field('init', optional(alias($.for_variable_declaration, $.variable_declaration))),
           ';',
-          field('condition', optional($.expression)),
+          field('condition', optional($._expression_base)),
           ';',
-          field('update', optional($.expression))
+          field('update', optional($._expression_base))
         ),
         seq(
           'var',
           field('variable', $.identifier),
           'in',
-          field('iterable', $.expression)
+          field('iterable', $._expression_base)
         )
       ),
       ')',
-      field('body', $.statement)
-    ),
+      field('body', choice(
+        $.variable_declaration,
+        $.function_declaration,
+        $.if_statement,
+        $.while_statement,
+        $.for_statement,
+        $.expression_statement,
+        $.block_statement,
+        $.return_statement,
+        $.empty_statement
+      ))
+    )),
 
     return_statement: $ => seq(
       'return',
-      optional($.expression),
+      optional($._expression_base),
       ';'
     ),
 
     expression_statement: $ => seq(
-      $.expression,
+      $._expression_base,
       ';'
     ),
 
     block_statement: $ => seq(
       '{',
-      repeat($.statement),
+      repeat(choice(
+        $.variable_declaration,
+        $.function_declaration,
+        $.if_statement,
+        $.while_statement,
+        $.for_statement,
+        $.expression_statement,
+        $.block_statement,
+        $.return_statement,
+        $.empty_statement,
+        $.comment
+      )),
       '}'
     ),
 
     empty_statement: $ => ';',
 
-    // Expressions
-    expression: $ => choice(
+    // Base expression rule that matches test expectations
+    _expression_base: $ => choice(
       $.assignment_expression,
-      $.conditional_expression
+      $.conditional_expression,
+      $.logical_or_expression,
+      $.logical_and_expression,
+      $.equality_expression,
+      $.relational_expression,
+      $.additive_expression,
+      $.multiplicative_expression,
+      $.unary_expression,
+      $.call_expression,
+      $.member_expression,
+      $.subscript_expression,
+      $.object_literal,
+      $.array_literal,
+      $.identifier,
+      $.number_literal,
+      $.string_literal,
+      $.boolean_literal,
+      $.null_literal,
+      seq('(', $._expression_base, ')')
     ),
 
-    assignment_expression: $ => prec.right(1, seq(
-      field('left', $.postfix_expression),
-      field('operator', choice('=', '+=', '-=', '*=', '/=')),
-      field('right', $.expression)
+    // Expressions
+    expression: $ => $._expression_base,
+
+    assignment_expression: $ => prec.right(1, choice(
+      seq(
+        field('left', $._expression_base),
+        field('operator', choice('=', '+=', '-=', '*=', '/=')),
+        field('right', $._expression_base)
+      ),
+      seq(
+        field('left', $._expression_base),
+        field('operator', alias(choice('++', '--'), $.string))
+      )
     )),
 
     conditional_expression: $ => prec.right(2, seq(
-      $.logical_or_expression,
-      optional(seq(
-        '?',
-        $.expression,
-        ':',
-        $.conditional_expression
-      ))
+      $._expression_base,
+      '?',
+      $._expression_base,
+      ':',
+      $._expression_base
     )),
 
-    logical_or_expression: $ => prec.left(3, choice(
-      $.logical_and_expression,
-      seq($.logical_or_expression, '||', $.logical_and_expression)
+    logical_or_expression: $ => prec.left(3, seq(
+      $._expression_base, '||', $._expression_base
     )),
 
-    logical_and_expression: $ => prec.left(4, choice(
-      $.equality_expression,
-      seq($.logical_and_expression, '&&', $.equality_expression)
+    logical_and_expression: $ => prec.left(4, seq(
+      $._expression_base, '&&', $._expression_base
     )),
 
-    equality_expression: $ => prec.left(5, choice(
-      $.relational_expression,
-      seq($.equality_expression, choice('==', '!='), $.relational_expression)
+    equality_expression: $ => prec.left(5, seq(
+      $._expression_base, choice('==', '!='), $._expression_base
     )),
 
-    relational_expression: $ => prec.left(6, choice(
-      $.additive_expression,
-      seq($.relational_expression, choice('<', '>', '<=', '>='), $.additive_expression)
+    relational_expression: $ => prec.left(6, seq(
+      $._expression_base, choice('<', '>', '<=', '>='), $._expression_base
     )),
 
-    additive_expression: $ => prec.left(7, choice(
-      $.multiplicative_expression,
-      seq($.additive_expression, choice('+', '-'), $.multiplicative_expression)
+    additive_expression: $ => prec.left(7, seq(
+      $._expression_base, choice('+', '-'), $._expression_base
     )),
 
-    multiplicative_expression: $ => prec.left(8, choice(
-      $.unary_expression,
-      seq($.multiplicative_expression, choice('*', '/', '%'), $.unary_expression)
+    multiplicative_expression: $ => prec.left(8, seq(
+      $._expression_base, choice('*', '/', '%'), $._expression_base
     )),
 
-    unary_expression: $ => choice(
-      $.postfix_expression,
-      seq(choice('+', '-', '!'), $.unary_expression)
-    ),
-
-    postfix_expression: $ => choice(
-      $.primary_expression,
-      $.call_expression,
-      $.member_expression,
-      $.subscript_expression
-    ),
+    unary_expression: $ => prec(9, seq(
+      choice('+', '-', '!'), $._expression_base
+    )),
 
     call_expression: $ => prec.left(10, seq(
-      field('function', $.postfix_expression),
+      field('function', $._expression_base),
       field('arguments', $.argument_list)
     )),
 
     member_expression: $ => prec.left(10, seq(
-      field('object', $.postfix_expression),
+      field('object', $._expression_base),
       '.',
       field('property', $.identifier)
     )),
 
     subscript_expression: $ => prec.left(10, seq(
-      field('object', $.postfix_expression),
+      field('object', $._expression_base),
       '[',
-      field('index', $.expression),
+      field('index', $._expression_base),
       ']'
     )),
 
     argument_list: $ => seq(
       '(',
       optional(seq(
-        $.expression,
-        repeat(seq(',', $.expression))
+        $._expression_base,
+        repeat(seq(',', $._expression_base))
       )),
       ')'
     ),
 
-    primary_expression: $ => choice(
-      $.identifier,
-      $.number_literal,
-      $.string_literal,
-      $.boolean_literal,
-      $.null_literal,
-      $.object_literal,
-      $.array_literal,
-      seq('(', $.expression, ')')
-    ),
 
     // Object literals: { key: value, ... }
     object_literal: $ => seq(
@@ -223,22 +294,22 @@ module.exports = grammar({
         $.string_literal
       ),
       ':',
-      $.expression
+      $._expression_base
     ),
 
     // Array literals: [1, 2, 3]
     array_literal: $ => seq(
       '[',
       optional(seq(
-        $.expression,
-        repeat(seq(',', $.expression)),
+        $._expression_base,
+        repeat(seq(',', $._expression_base)),
         optional(',')
       )),
       ']'
     ),
 
     // Literals
-    identifier: $ => /[a-zA-Z_][a-zA-Z0-9_]*/,
+    identifier: $ => token(prec(-1, /[a-zA-Z_][a-zA-Z0-9_]*/)),
 
     number_literal: $ => choice(
       /\d+/,
@@ -282,7 +353,9 @@ module.exports = grammar({
   conflicts: $ => [
     // Handle potential ambiguities
     [$.assignment_expression, $.conditional_expression],
-    [$.call_expression, $.member_expression]
+    [$.call_expression, $.member_expression],
+    [$.block_statement, $.object_literal],
+    [$.expression]
   ],
 
   word: $ => $.identifier

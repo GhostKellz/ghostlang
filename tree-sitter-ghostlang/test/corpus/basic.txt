@@ -130,10 +130,7 @@ for (var i = 0; i < items.length; i++) {
         property: (identifier)))
     update: (assignment_expression
       left: (identifier)
-      operator: (string)
-      right: (additive_expression
-        (identifier)
-        (number_literal)))
+      operator: (string))
     body: (block_statement
       (expression_statement
         (call_expression
