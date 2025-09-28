@@ -10,7 +10,6 @@
 [![Tree-sitter](https://img.shields.io/badge/tree--sitter-grammar-green?logo=tree-sitter&logoColor=white)](https://tree-sitter.github.io/)
 [![Cross Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://github.com/GhostKellz/ghostlang)
 [![Documentation](https://img.shields.io/badge/docs-available-brightgreen)](https://github.com/GhostKellz/ghostlang/tree/main/docs)
-[![Contributors Welcome](https://img.shields.io/badge/contributors-welcome-purple)](https://github.com/GhostKellz/ghostlang/blob/main/CONTRIBUTING.md)
 
 A lightweight embedded scripting engine written in Zig, designed as a modern replacement for Lua. It provides Lua-like syntax with JavaScript compatibility, sandboxing, foreign function interface, and optional JIT compilation.
 
