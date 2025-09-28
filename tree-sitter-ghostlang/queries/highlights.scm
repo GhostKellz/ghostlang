@@ -11,9 +11,6 @@
   "for"
   "in"
   "return"
-  "true"
-  "false"
-  "null"
 ] @keyword
 
 ; Operators
