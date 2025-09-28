@@ -10,7 +10,7 @@ jobs:
   # Grammar Development & Testing
   grammar:
     name: Tree-sitter Grammar Tests
-    runs-on: [self-hosted, nvidia, gpu, zig, palladium]
+    runs-on: self-hosted
 
     steps:
     - uses: actions/checkout@v4
@@ -56,7 +56,7 @@ jobs:
   # Language Runtime Build & Test
   language:
     name: Ghostlang Runtime
-    runs-on: [self-hosted, nvidia, gpu, zig, palladium]
+    runs-on: self-hosted
 
     steps:
     - uses: actions/checkout@v4
@@ -95,7 +95,7 @@ jobs:
   # Combined Integration Test
   integration:
     name: Full Integration Test
-    runs-on: [self-hosted, nvidia, gpu, zig, palladium]
+    runs-on: self-hosted
     needs: [grammar, language]
 
     steps:
@@ -133,7 +133,7 @@ jobs:
   # Release (only on main branch)
   release:
     name: Create Release Artifacts
-    runs-on: [self-hosted, nvidia, gpu, zig, palladium]
+    runs-on: self-hosted
     needs: [integration]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
