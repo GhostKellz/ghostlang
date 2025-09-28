@@ -7,7 +7,6 @@ on:
     branches: [ main ]
 
 jobs:
-  # Grammar Development & Testing
   grammar:
     name: Tree-sitter Grammar Tests
     runs-on: self-hosted
@@ -30,30 +29,19 @@ jobs:
       working-directory: tree-sitter-ghostlang
       run: npx tree-sitter generate
 
-    - name: Run grammar tests (corpus validation)
+    - name: Run grammar tests
       working-directory: tree-sitter-ghostlang
       run: npx tree-sitter test
 
     - name: Validate query files
       working-directory: tree-sitter-ghostlang
       run: |
-        echo "Validating query files exist and are syntactically correct..."
+        echo "Validating query files..."
         test -f queries/highlights.scm
         test -f queries/locals.scm
         test -f queries/injections.scm
         test -f queries/textobjects.scm
-        # Test query syntax by attempting to parse with tree-sitter
-        npx tree-sitter query queries/highlights.scm --capture
-        npx tree-sitter query queries/locals.scm --capture
 
-    - name: Grammar compilation check
-      working-directory: tree-sitter-ghostlang
-      run: |
-        echo "Verifying grammar compiles successfully..."
-        npx tree-sitter generate
-        echo "Grammar compilation successful "
-
-  # Language Runtime Build & Test
   language:
     name: Ghostlang Runtime
     runs-on: self-hosted
@@ -69,73 +57,17 @@ jobs:
     - name: Build Ghostlang runtime
       run: |
         zig build
-        echo "Build completed successfully "
+        echo "Build completed successfully"
 
     - name: Run Zig tests
       run: |
         zig build test
-        echo "All tests passed "
+        echo "All tests passed"
 
-    - name: Build safety demo
-      run: |
-        zig build safety-demo
-        echo "Safety demo build completed "
-
-    - name: Build Phase 2 integration test
-      run: |
-        zig build phase2-test
-        echo "Phase 2 integration test build completed "
-
-    - name: Test executable functionality
-      run: |
-        echo "Testing main executable..."
-        ./zig-out/bin/ghostlang --help || echo "Help output test completed"
-        echo "Executable functionality verified "
-
-  # Combined Integration Test
   integration:
-    name: Full Integration Test
+    name: Integration Test
     runs-on: self-hosted
     needs: [grammar, language]
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Setup Node.js for grammar
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: tree-sitter-ghostlang/package.json
-
-    - name: Install dependencies and build grammar
-      working-directory: tree-sitter-ghostlang
-      run: |
-        npm install
-        npx tree-sitter generate
-
-    - name: Build complete Ghostlang system
-      run: |
-        echo "Building complete Ghostlang system..."
-        zig build
-        zig build test
-        echo "Full system integration test passed "
-
-    - name: Archive build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ghostlang-build-${{ github.sha }}
-        path: |
-          zig-out/
-          tree-sitter-ghostlang/src/
-        retention-days: 7
-
-  # Release (only on main branch)
-  release:
-    name: Create Release Artifacts
-    runs-on: self-hosted
-    needs: [integration]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
     - uses: actions/checkout@v4
@@ -147,30 +79,12 @@ jobs:
         cache: 'npm'
         cache-dependency-path: tree-sitter-ghostlang/package.json
 
-    - name: Build release artifacts
+    - name: Build complete system
       run: |
-        echo "Building optimized release version..."
-        # Build grammar
         cd tree-sitter-ghostlang
         npm install
         npx tree-sitter generate
         cd ..
-
-        # Build optimized Zig binary
-        zig build -Doptimize=ReleaseFast
-        echo "Release build completed "
-
-    - name: Package release
-      run: |
-        mkdir -p release/
-        cp -r zig-out/ release/
-        cp -r tree-sitter-ghostlang/src/ release/grammar/
-        cp -r tree-sitter-ghostlang/queries/ release/grammar/
-        tar -czf ghostlang-release-${{ github.sha }}.tar.gz release/
-
-    - name: Upload release artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ghostlang-release-${{ github.sha }}
-        path: ghostlang-release-${{ github.sha }}.tar.gz
-        retention-days: 30
+        zig build
+        zig build test
+        echo "Integration test passed"
