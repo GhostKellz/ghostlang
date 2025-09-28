@@ -4,8 +4,13 @@
   <img src="assets/icons/glang-proto.png" alt="ghostlang logo" width="200"/>
 </p>
 
-[![Built with Zig](https://img.shields.io/badge/built%20with-Zig-orange)](https://ziglang.org/)
-[![Zig Version](https://img.shields.io/badge/zig-0.16.0--dev-orange)](https://ziglang.org/download/)
+[![CI/CD](https://github.com/GhostKellz/ghostlang/actions/workflows/main.yml/badge.svg)](https://github.com/GhostKellz/ghostlang/actions/workflows/main.yml)
+[![Built with Zig](https://img.shields.io/badge/built%20with-Zig-F7A41D?logo=zig&logoColor=white)](https://ziglang.org/)
+[![Version](https://img.shields.io/badge/version-0.16.0--dev-orange)](https://github.com/GhostKellz/ghostlang/releases)
+[![Tree-sitter](https://img.shields.io/badge/tree--sitter-grammar-green?logo=tree-sitter&logoColor=white)](https://tree-sitter.github.io/)
+[![Cross Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://github.com/GhostKellz/ghostlang)
+[![Documentation](https://img.shields.io/badge/docs-available-brightgreen)](https://github.com/GhostKellz/ghostlang/tree/main/docs)
+[![Contributors Welcome](https://img.shields.io/badge/contributors-welcome-purple)](https://github.com/GhostKellz/ghostlang/blob/main/CONTRIBUTING.md)
 
 A lightweight embedded scripting engine written in Zig, designed as a modern replacement for Lua. It provides Lua-like syntax with JavaScript compatibility, sandboxing, foreign function interface, and optional JIT compilation.
 
