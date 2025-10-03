@@ -1,0 +1,26 @@
+// Line Numbers Plugin
+// Adds line numbers to the current buffer
+
+// Configuration
+var show_line_numbers = true
+var number_width = 4
+var start_line = 1
+
+// Get buffer information
+var line_count = 100  // Would call buffer.getLineCount()
+var current_line = 1
+
+// Calculate display settings
+var total_width = number_width + 2  // numbers + spacing
+var display_area = total_width * line_count
+
+// Render line numbers
+var rendered = 0
+while (current_line < line_count + 1) {
+    var line_num = current_line
+    rendered = rendered + 1
+    current_line = current_line + 1
+}
+
+// Return result
+rendered

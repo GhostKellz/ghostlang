@@ -1,0 +1,45 @@
+// Duplicate Line Plugin
+// Duplicates the current line or selection
+
+// Get current cursor position
+var cursor_line = 42
+var cursor_col = 15
+
+// Get line content (would fetch from buffer)
+var line_length = 80
+var line_number = cursor_line
+
+// Selection mode or single line?
+var has_selection = false
+var selection_lines = 1
+
+// Calculate duplication
+var lines_to_duplicate = 1
+if (has_selection) {
+    lines_to_duplicate = selection_lines
+}
+
+// Insert position
+var insert_line = cursor_line + 1
+var new_line_count = lines_to_duplicate
+
+// Perform duplication
+var duplicated = 0
+var i = 0
+while (i < lines_to_duplicate) {
+    // Copy line content
+    var copied_length = line_length
+
+    // Insert at new position
+    var insert_pos = insert_line + i
+
+    duplicated = duplicated + 1
+    i = i + 1
+}
+
+// Move cursor to first duplicated line
+var new_cursor_line = insert_line
+var new_cursor_col = cursor_col
+
+// Return number of lines duplicated
+duplicated

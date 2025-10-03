@@ -178,6 +178,132 @@ pub fn build(b: *std.Build) void {
     const run_phase2 = b.step("phase2-test", "Run Phase 2 integration test");
     run_phase2.dependOn(&run_phase2_cmd.step);
 
+    // Fuzzing target
+    const simple_fuzz = b.addExecutable(.{
+        .name = "simple_fuzz",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("fuzz/simple_fuzz.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ghostlang", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(simple_fuzz);
+
+    const run_simple_fuzz_cmd = b.addRunArtifact(simple_fuzz);
+    const run_fuzz = b.step("fuzz", "Run fuzzing tests");
+    run_fuzz.dependOn(&run_simple_fuzz_cmd.step);
+
+    // Benchmarking
+    const plugin_bench = b.addExecutable(.{
+        .name = "plugin_bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("benchmarks/plugin_bench.zig"),
+            .target = target,
+            .optimize = .ReleaseFast, // Use optimized build for benchmarks
+            .imports = &.{
+                .{ .name = "ghostlang", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(plugin_bench);
+
+    const run_plugin_bench_cmd = b.addRunArtifact(plugin_bench);
+    const run_bench = b.step("bench", "Run performance benchmarks");
+    run_bench.dependOn(&run_plugin_bench_cmd.step);
+
+    // Memory limit test
+    const memory_test = b.addExecutable(.{
+        .name = "memory_limit_test",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/memory_limit_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ghostlang", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(memory_test);
+
+    const run_memory_test_cmd = b.addRunArtifact(memory_test);
+    const run_memory_test = b.step("test-memory", "Test memory limit allocator");
+    run_memory_test.dependOn(&run_memory_test_cmd.step);
+
+    // Security audit
+    const security_audit = b.addExecutable(.{
+        .name = "sandbox_audit",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("security/sandbox_audit.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ghostlang", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(security_audit);
+
+    const run_security_audit_cmd = b.addRunArtifact(security_audit);
+    const run_security = b.step("security", "Run security audit suite");
+    run_security.dependOn(&run_security_audit_cmd.step);
+
+    // Integration test
+    const integration_test = b.addExecutable(.{
+        .name = "integration_test",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/integration_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ghostlang", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(integration_test);
+
+    const run_integration_test_cmd = b.addRunArtifact(integration_test);
+    const run_integration = b.step("test-integration", "Run integration test suite");
+    run_integration.dependOn(&run_integration_test_cmd.step);
+
+    // VM Profiler
+    const vm_profiler = b.addExecutable(.{
+        .name = "vm_profiler",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("benchmarks/vm_profiler.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+            .imports = &.{
+                .{ .name = "ghostlang", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(vm_profiler);
+
+    const run_vm_profiler_cmd = b.addRunArtifact(vm_profiler);
+    const run_profile = b.step("profile", "Run VM performance profiler");
+    run_profile.dependOn(&run_vm_profiler_cmd.step);
+
+    // Plugin scenarios test
+    const plugin_scenarios = b.addExecutable(.{
+        .name = "plugin_scenarios",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/plugin_scenarios.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ghostlang", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(plugin_scenarios);
+
+    const run_plugin_scenarios_cmd = b.addRunArtifact(plugin_scenarios);
+    const run_scenarios = b.step("test-plugins", "Run plugin scenario tests");
+    run_scenarios.dependOn(&run_plugin_scenarios_cmd.step);
+
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
     // The Zig build system is entirely implemented in userland, which means

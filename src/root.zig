@@ -186,23 +186,24 @@ pub const SecurityContext = struct {
 pub const ScriptEngine = struct {
     config: EngineConfig,
     globals: std.StringHashMap(ScriptValue),
-    memory_limiter: ?MemoryLimitAllocator,
+    memory_limiter: ?*MemoryLimitAllocator, // Heap-allocated to keep address stable
     tracked_allocator: std.mem.Allocator,
     security: SecurityContext,
 
     pub fn create(config: EngineConfig) !ScriptEngine {
+        // Allocate the memory limiter on the heap so its address stays stable
+        const limiter = try config.allocator.create(MemoryLimitAllocator);
+        errdefer config.allocator.destroy(limiter);
+
+        limiter.* = MemoryLimitAllocator.init(config.allocator, config.memory_limit);
+
         var engine = ScriptEngine{
             .config = config,
             .globals = undefined,
-            .memory_limiter = null,
-            .tracked_allocator = config.allocator,
+            .memory_limiter = limiter,
+            .tracked_allocator = limiter.allocator(),
             .security = SecurityContext.init(config),
         };
-
-        // TODO: Fix memory limiting allocator - temporarily disabled
-        // engine.memory_limiter = MemoryLimitAllocator.init(config.allocator, config.memory_limit);
-        // engine.tracked_allocator = engine.memory_limiter.?.allocator();
-        engine.tracked_allocator = config.allocator;
 
         engine.globals = std.StringHashMap(ScriptValue).init(engine.tracked_allocator);
         return engine;
@@ -215,6 +216,11 @@ pub const ScriptEngine = struct {
             entry.value_ptr.deinit(self.tracked_allocator);
         }
         self.globals.deinit();
+
+        // Free the heap-allocated memory limiter
+        if (self.memory_limiter) |limiter| {
+            self.config.allocator.destroy(limiter);
+        }
     }
 
     pub fn loadScript(self: *ScriptEngine, source: []const u8) ExecutionError!Script {
@@ -223,10 +229,18 @@ pub const ScriptEngine = struct {
             error.OutOfMemory => return ExecutionError.MemoryLimitExceeded,
             else => return ExecutionError.ParseError,
         };
-        return Script{
+        var script = Script{
             .engine = self,
             .vm = VM.init(self.tracked_allocator, parsed.instructions, parsed.constants, self),
         };
+
+        // Register built-in functions
+        try BuiltinFunctions.registerBuiltins(&script.vm);
+
+        // Register editor API functions
+        try EditorAPI.registerEditorAPI(&script.vm);
+
+        return script;
     }
 
     const PreparedArg = struct {
@@ -521,10 +535,13 @@ pub const Opcode = enum(u8) {
     sub,
     mul,
     div,
+    mod,
     eq,
     neq,
     lt,
     gt,
+    lte,
+    gte,
     and_op,
     or_op,
     begin_scope,
@@ -672,6 +689,18 @@ pub const VM = struct {
                         return ExecutionError.TypeError;
                     }
                 },
+                .mod => {
+                    const dest = instr.operands[0];
+                    const a = instr.operands[1];
+                    const b = instr.operands[2];
+                    const val_a = self.registers[a];
+                    const val_b = self.registers[b];
+                    if (val_a == .number and val_b == .number) {
+                        self.registers[dest] = .{ .number = @mod(val_a.number, val_b.number) };
+                    } else {
+                        return ExecutionError.TypeError;
+                    }
+                },
                 .eq => {
                     const dest = instr.operands[0];
                     const a = instr.operands[1];
@@ -708,6 +737,30 @@ pub const VM = struct {
                     const val_b = self.registers[b];
                     if (val_a == .number and val_b == .number) {
                         self.registers[dest] = .{ .boolean = val_a.number > val_b.number };
+                    } else {
+                        return ExecutionError.TypeError;
+                    }
+                },
+                .lte => {
+                    const dest = instr.operands[0];
+                    const a = instr.operands[1];
+                    const b = instr.operands[2];
+                    const val_a = self.registers[a];
+                    const val_b = self.registers[b];
+                    if (val_a == .number and val_b == .number) {
+                        self.registers[dest] = .{ .boolean = val_a.number <= val_b.number };
+                    } else {
+                        return ExecutionError.TypeError;
+                    }
+                },
+                .gte => {
+                    const dest = instr.operands[0];
+                    const a = instr.operands[1];
+                    const b = instr.operands[2];
+                    const val_a = self.registers[a];
+                    const val_b = self.registers[b];
+                    if (val_a == .number and val_b == .number) {
+                        self.registers[dest] = .{ .boolean = val_a.number >= val_b.number };
                     } else {
                         return ExecutionError.TypeError;
                     }
@@ -934,6 +987,227 @@ pub const VM = struct {
     }
 };
 
+// ============================================================================
+// Built-in Functions
+// ============================================================================
+
+pub const BuiltinFunctions = struct {
+    // String functions
+    pub fn builtin_len(args: []const ScriptValue) ScriptValue {
+        if (args.len != 1) return .{ .nil = {} };
+        switch (args[0]) {
+            .string => |s| return .{ .number = @floatFromInt(s.len) },
+            .array => |arr| return .{ .number = @floatFromInt(arr.items.len) },
+            else => return .{ .nil = {} },
+        }
+    }
+
+    pub fn builtin_toUpperCase(args: []const ScriptValue) ScriptValue {
+        if (args.len != 1) return .{ .nil = {} };
+        if (args[0] != .string) return .{ .nil = {} };
+
+        const input = args[0].string;
+        // For simplicity, return original for now - proper implementation would allocate
+        // TODO: Implement proper string allocation and transformation
+        _ = input;
+        return args[0];
+    }
+
+    pub fn builtin_toLowerCase(args: []const ScriptValue) ScriptValue {
+        if (args.len != 1) return .{ .nil = {} };
+        if (args[0] != .string) return .{ .nil = {} };
+
+        const input = args[0].string;
+        // For simplicity, return original for now - proper implementation would allocate
+        // TODO: Implement proper string allocation and transformation
+        _ = input;
+        return args[0];
+    }
+
+    pub fn builtin_print(args: []const ScriptValue) ScriptValue {
+        for (args, 0..) |arg, i| {
+            switch (arg) {
+                .nil => std.debug.print("nil", .{}),
+                .boolean => |b| std.debug.print("{}", .{b}),
+                .number => |n| std.debug.print("{d}", .{n}),
+                .string => |s| std.debug.print("{s}", .{s}),
+                .function => std.debug.print("<function>", .{}),
+                .table => std.debug.print("<table>", .{}),
+                .array => std.debug.print("<array>", .{}),
+            }
+            if (i < args.len - 1) std.debug.print(" ", .{});
+        }
+        std.debug.print("\n", .{});
+        return .{ .nil = {} };
+    }
+
+    pub fn builtin_type(args: []const ScriptValue) ScriptValue {
+        if (args.len != 1) return .{ .nil = {} };
+        const type_name = switch (args[0]) {
+            .nil => "nil",
+            .boolean => "boolean",
+            .number => "number",
+            .string => "string",
+            .function => "function",
+            .table => "table",
+            .array => "array",
+        };
+        // TODO: Allocate string properly
+        return .{ .string = type_name };
+    }
+
+    pub fn registerBuiltins(vm: *VM) !void {
+        const builtins = [_]struct { name: []const u8, func: *const fn (args: []const ScriptValue) ScriptValue }{
+            .{ .name = "len", .func = &builtin_len },
+            .{ .name = "print", .func = &builtin_print },
+            .{ .name = "type", .func = &builtin_type },
+            .{ .name = "toUpperCase", .func = &builtin_toUpperCase },
+            .{ .name = "toLowerCase", .func = &builtin_toLowerCase },
+        };
+
+        for (builtins) |builtin| {
+            // Don't overwrite user-registered functions from engine.globals
+            if (vm.engine.globals.get(builtin.name) != null) continue;
+
+            const name_copy = try vm.allocator.dupe(u8, builtin.name);
+            try vm.globals.put(name_copy, .{ .function = builtin.func });
+        }
+    }
+};
+
+// ============================================================================
+// Editor API
+// ============================================================================
+
+/// EditorAPI provides buffer manipulation functions for plugin development
+/// This is a mock implementation - real implementation will integrate with Grim
+pub const EditorAPI = struct {
+    lines: std.ArrayList([]const u8),
+    cursor_line: usize,
+    cursor_col: usize,
+    selection_start: usize,
+    selection_end: usize,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) !EditorAPI {
+        var api = EditorAPI{
+            .lines = std.ArrayList([]const u8).init(allocator),
+            .cursor_line = 0,
+            .cursor_col = 0,
+            .selection_start = 0,
+            .selection_end = 0,
+            .allocator = allocator,
+        };
+
+        // Initialize with some sample content
+        try api.lines.append(try allocator.dupe(u8, "Line 1"));
+        try api.lines.append(try allocator.dupe(u8, "Line 2"));
+        try api.lines.append(try allocator.dupe(u8, "Line 3"));
+
+        return api;
+    }
+
+    pub fn deinit(self: *EditorAPI) void {
+        for (self.lines.items) |line| {
+            self.allocator.free(line);
+        }
+        self.lines.deinit();
+    }
+
+    // Buffer operations
+    pub fn builtin_getLineCount(args: []const ScriptValue) ScriptValue {
+        _ = args;
+        // TODO: Get from actual editor context
+        return .{ .number = 100 };
+    }
+
+    pub fn builtin_getLineText(args: []const ScriptValue) ScriptValue {
+        if (args.len != 1) return .{ .nil = {} };
+        if (args[0] != .number) return .{ .nil = {} };
+
+        // TODO: Get from actual editor context
+        const line_num = @as(usize, @intFromFloat(args[0].number));
+        _ = line_num;
+        return .{ .string = "sample line text" };
+    }
+
+    pub fn builtin_setLineText(args: []const ScriptValue) ScriptValue {
+        if (args.len != 2) return .{ .nil = {} };
+        if (args[0] != .number) return .{ .nil = {} };
+        if (args[1] != .string) return .{ .nil = {} };
+
+        // TODO: Set in actual editor context
+        const line_num = @as(usize, @intFromFloat(args[0].number));
+        const text = args[1].string;
+        _ = line_num;
+        _ = text;
+        return .{ .nil = {} };
+    }
+
+    // Cursor operations
+    pub fn builtin_getCursorLine(args: []const ScriptValue) ScriptValue {
+        _ = args;
+        // TODO: Get from actual editor context
+        return .{ .number = 0 };
+    }
+
+    pub fn builtin_getCursorCol(args: []const ScriptValue) ScriptValue {
+        _ = args;
+        // TODO: Get from actual editor context
+        return .{ .number = 0 };
+    }
+
+    pub fn builtin_setCursorPosition(args: []const ScriptValue) ScriptValue {
+        if (args.len != 2) return .{ .nil = {} };
+        if (args[0] != .number) return .{ .nil = {} };
+        if (args[1] != .number) return .{ .nil = {} };
+
+        // TODO: Set in actual editor context
+        const line = @as(usize, @intFromFloat(args[0].number));
+        const col = @as(usize, @intFromFloat(args[1].number));
+        _ = line;
+        _ = col;
+        return .{ .nil = {} };
+    }
+
+    // Selection operations
+    pub fn builtin_getSelectionStart(args: []const ScriptValue) ScriptValue {
+        _ = args;
+        // TODO: Get from actual editor context
+        return .{ .number = 0 };
+    }
+
+    pub fn builtin_getSelectionEnd(args: []const ScriptValue) ScriptValue {
+        _ = args;
+        // TODO: Get from actual editor context
+        return .{ .number = 0 };
+    }
+
+    pub fn builtin_setSelection(args: []const ScriptValue) ScriptValue {
+        if (args.len != 4) return .{ .nil = {} };
+
+        // TODO: Set in actual editor context
+        return .{ .nil = {} };
+    }
+
+    pub fn registerEditorAPI(vm: *VM) !void {
+        // Buffer operations
+        try vm.globals.put(try vm.allocator.dupe(u8, "getLineCount"), .{ .function = &builtin_getLineCount });
+        try vm.globals.put(try vm.allocator.dupe(u8, "getLineText"), .{ .function = &builtin_getLineText });
+        try vm.globals.put(try vm.allocator.dupe(u8, "setLineText"), .{ .function = &builtin_setLineText });
+
+        // Cursor operations
+        try vm.globals.put(try vm.allocator.dupe(u8, "getCursorLine"), .{ .function = &builtin_getCursorLine });
+        try vm.globals.put(try vm.allocator.dupe(u8, "getCursorCol"), .{ .function = &builtin_getCursorCol });
+        try vm.globals.put(try vm.allocator.dupe(u8, "setCursorPosition"), .{ .function = &builtin_setCursorPosition });
+
+        // Selection operations
+        try vm.globals.put(try vm.allocator.dupe(u8, "getSelectionStart"), .{ .function = &builtin_getSelectionStart });
+        try vm.globals.put(try vm.allocator.dupe(u8, "getSelectionEnd"), .{ .function = &builtin_getSelectionEnd });
+        try vm.globals.put(try vm.allocator.dupe(u8, "setSelection"), .{ .function = &builtin_setSelection });
+    }
+};
+
 pub const Script = struct {
     engine: *ScriptEngine,
     vm: VM,
@@ -975,6 +1249,8 @@ pub const Parser = struct {
     source: []const u8,
     pos: usize,
     temp_counter: usize,
+    line: usize,
+    column: usize,
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8) Parser {
         return Parser{
@@ -982,6 +1258,8 @@ pub const Parser = struct {
             .source = source,
             .pos = 0,
             .temp_counter = 0,
+            .line = 1,
+            .column = 1,
         };
     }
 
@@ -1265,7 +1543,17 @@ pub const Parser = struct {
         var left = try self.parseAddition(constants, instructions, reg_start);
         while (true) {
             self.skipWhitespace();
-            if (self.matchOperator("<")) {
+            if (self.matchOperator("<=")) {
+                self.skipWhitespace();
+                const right = try self.parseAddition(constants, instructions, left.next_reg);
+                try instructions.append(self.allocator, .{ .opcode = .lte, .operands = [_]u16{ left.result_reg, left.result_reg, right.result_reg } });
+                left = .{ .result_reg = left.result_reg, .next_reg = right.next_reg };
+            } else if (self.matchOperator(">=")) {
+                self.skipWhitespace();
+                const right = try self.parseAddition(constants, instructions, left.next_reg);
+                try instructions.append(self.allocator, .{ .opcode = .gte, .operands = [_]u16{ left.result_reg, left.result_reg, right.result_reg } });
+                left = .{ .result_reg = left.result_reg, .next_reg = right.next_reg };
+            } else if (self.matchOperator("<")) {
                 self.skipWhitespace();
                 const right = try self.parseAddition(constants, instructions, left.next_reg);
                 try instructions.append(self.allocator, .{ .opcode = .lt, .operands = [_]u16{ left.result_reg, left.result_reg, right.result_reg } });
@@ -1311,7 +1599,7 @@ pub const Parser = struct {
         while (true) {
             self.skipWhitespace();
             const peeked = self.peek() orelse break;
-            if (peeked == '*' or peeked == '/') {
+            if (peeked == '*' or peeked == '/' or peeked == '%') {
                 const op = peeked;
                 self.advance();
                 self.skipWhitespace();
@@ -1319,6 +1607,7 @@ pub const Parser = struct {
                 const opcode: Opcode = switch (op) {
                     '*' => .mul,
                     '/' => .div,
+                    '%' => .mod,
                     else => unreachable,
                 };
                 try instructions.append(self.allocator, .{ .opcode = opcode, .operands = [_]u16{ left.result_reg, left.result_reg, right.result_reg } });
@@ -1537,12 +1826,20 @@ pub const Parser = struct {
     }
 
     fn advance(self: *Parser) void {
-        if (self.pos < self.source.len) self.pos += 1;
+        if (self.pos < self.source.len) {
+            if (self.source[self.pos] == '\n') {
+                self.line += 1;
+                self.column = 1;
+            } else {
+                self.column += 1;
+            }
+            self.pos += 1;
+        }
     }
 
     fn skipWhitespace(self: *Parser) void {
         while (self.pos < self.source.len and std.ascii.isWhitespace(self.source[self.pos])) {
-            self.pos += 1;
+            self.advance();
         }
     }
 
@@ -1550,8 +1847,24 @@ pub const Parser = struct {
         if (self.peek() == char) {
             self.advance();
         } else {
+            // TODO: Store error info in parser for later retrieval
+            // std.debug.print("Parse error at line {d}, column {d}: expected '{c}'\n", .{ self.line, self.column, char });
+            _ = self.line;
+            _ = self.column;
             return ExecutionError.ParseError;
         }
+    }
+
+    fn parseError(self: *Parser, comptime fmt: []const u8, args: anytype) ExecutionError {
+        // TODO: Store error info in parser for later retrieval
+        // std.debug.print("Parse error at line {d}, column {d}: ", .{ self.line, self.column });
+        // std.debug.print(fmt, args);
+        // std.debug.print("\n", .{});
+        _ = self.line;
+        _ = self.column;
+        _ = fmt;
+        _ = args;
+        return ExecutionError.ParseError;
     }
 };
 

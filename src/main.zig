@@ -14,11 +14,35 @@ pub fn main() !void {
 
     try engine.registerFunction("print", printFunc);
 
-    // Load and run a script
-    var script = try engine.loadScript("3 + 4");
+    // Test all new features
+    const test_script =
+        \\var a = 10
+        \\var b = 3
+        \\var mod_result = a % b
+        \\var lte_test = a <= b
+        \\var gte_test = a >= b
+        \\var s = "hello"
+        \\var s_len = len(s)
+        \\var line_count = getLineCount()
+        \\mod_result
+    ;
+
+    // Load and run the script
+    var script = try engine.loadScript(test_script);
     defer script.deinit();
     const result = try script.run();
-    std.debug.print("Script result: {}\n", .{result.number});
+
+    // Print result
+    std.debug.print("\nFinal result: ", .{});
+    switch (result) {
+        .nil => std.debug.print("nil\n", .{}),
+        .boolean => |b| std.debug.print("{}\n", .{b}),
+        .number => |n| std.debug.print("{d}\n", .{n}),
+        .string => |s| std.debug.print("{s}\n", .{s}),
+        .function => std.debug.print("<function>\n", .{}),
+        .table => std.debug.print("<table>\n", .{}),
+        .array => std.debug.print("<array>\n", .{}),
+    }
 
     // Call a script function
     // const call_result = try engine.call("add", .{1, 2});

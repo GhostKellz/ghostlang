@@ -1,0 +1,30 @@
+// Auto Indent Plugin
+// Automatically indents code based on context
+
+// Configuration
+var indent_size = 4
+var use_spaces = true
+var tab_width = 4
+
+// Detect indentation context
+var brace_open = 1
+var brace_close = 0
+var paren_open = 0
+var paren_close = 0
+
+// Calculate indent level
+var nest_level = brace_open - brace_close + paren_open - paren_close
+var current_indent = nest_level * indent_size
+
+// Apply indentation
+var spaces_to_add = current_indent
+var total_spaces = spaces_to_add
+
+// Smart indent for common patterns
+var is_after_if = true
+if (is_after_if) {
+    total_spaces = total_spaces + indent_size
+}
+
+// Return total indentation
+total_spaces

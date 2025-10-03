@@ -1,0 +1,37 @@
+// Comment Toggle Plugin
+// Toggles line/block comments
+
+// Configuration
+var comment_style = 2  // 1=line, 2=block
+var line_comment = 47  // ASCII for '/'
+var block_start = 42   // ASCII for '*'
+
+// Selection info
+var selection_start = 10
+var selection_end = 50
+var lines_affected = 5
+
+// Check if already commented
+var is_commented = false
+var toggle_state = 1  // 1=comment, 0=uncomment
+
+// Calculate operations
+var operations = 0
+if (toggle_state == 1) {
+    // Add comments
+    operations = lines_affected * 2  // start + end markers
+} else {
+    // Remove comments
+    operations = lines_affected * 2
+}
+
+// Process each line
+var processed = 0
+var i = 0
+while (i < lines_affected) {
+    processed = processed + 1
+    i = i + 1
+}
+
+// Return number of lines modified
+processed

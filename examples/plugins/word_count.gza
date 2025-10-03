@@ -1,0 +1,44 @@
+// Word Count Plugin
+// Counts words, characters, and lines in selection or buffer
+
+// Configuration
+var count_mode = 1  // 1=selection, 2=buffer, 3=paragraph
+
+// Buffer statistics (would be fetched from editor API)
+var total_chars = 5000
+var total_lines = 100
+var total_words = 850
+
+// Selection boundaries
+var sel_start = 0
+var sel_end = 1000
+
+// Calculate selection stats
+var sel_chars = sel_end - sel_start
+var estimated_words = sel_chars / 6  // Average word length
+var estimated_lines = sel_chars / 50 // Average line length
+
+// Detailed analysis
+var words = 0
+var chars = 0
+var lines = 1
+var i = 0
+
+// Count words (simplified - would parse actual text)
+while (i < sel_chars) {
+    // Check for word boundaries (space, newline, etc.)
+    var is_boundary = (i + 1) * 6 < sel_chars
+    if (is_boundary) {
+        words = words + 1
+    }
+    chars = chars + 1
+    i = i + 1
+}
+
+// Calculate reading time (words per minute)
+var wpm = 200
+var reading_time_minutes = words / wpm
+
+// Statistics summary
+var total_items = words + lines + chars
+total_items
