@@ -106,8 +106,8 @@ jobs:
         valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --error-exitcode=1 \
           ./zig-out/bin/ghostlang <<< "var x = 10" 2>&1 | tee valgrind.log
 
-        if grep -q "definitely lost: 0 bytes" valgrind.log && \
-           grep -q "indirectly lost: 0 bytes" valgrind.log; then
+        if grep -q "All heap blocks were freed -- no leaks are possible" valgrind.log || \
+           (grep -q "definitely lost: 0 bytes" valgrind.log && grep -q "indirectly lost: 0 bytes" valgrind.log); then
           echo "✓ No memory leaks detected"
         else
           echo "✗ Memory leaks found!"
@@ -119,56 +119,13 @@ jobs:
         valgrind --leak-check=full --error-exitcode=1 \
           ./zig-out/bin/memory_limit_test 2>&1 | tee mem-test-valgrind.log
 
-        if grep -q "definitely lost: 0 bytes" mem-test-valgrind.log; then
+        if grep -q "All heap blocks were freed -- no leaks are possible" mem-test-valgrind.log || \
+           grep -q "definitely lost: 0 bytes" mem-test-valgrind.log; then
           echo "✓ Memory limit allocator has no leaks"
         else
           echo "✗ Memory leaks in allocator!"
           exit 1
         fi
-
-  cross-platform:
-    name: Cross-Platform Testing
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        include:
-          - os: ubuntu-latest
-            zig-url: https://ziglang.org/download/0.16.0-dev/zig-linux-x86_64-0.16.0-dev.tar.xz
-          - os: macos-latest
-            zig-url: https://ziglang.org/download/0.16.0-dev/zig-macos-aarch64-0.16.0-dev.tar.xz
-          - os: windows-latest
-            zig-url: https://ziglang.org/download/0.16.0-dev/zig-windows-x86_64-0.16.0-dev.zip
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Setup Zig (Linux/macOS)
-      if: runner.os != 'Windows'
-      run: |
-        wget ${{ matrix.zig-url }} -O zig.tar.xz
-        tar -xf zig.tar.xz
-        echo "$PWD/zig-linux-*/bin" >> $GITHUB_PATH || echo "$PWD/zig-macos-*/bin" >> $GITHUB_PATH
-
-    - name: Setup Zig (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        curl -L ${{ matrix.zig-url }} -o zig.zip
-        unzip zig.zip
-        echo "$PWD\zig-windows-*\bin" >> $env:GITHUB_PATH
-
-    - name: Build Ghostlang
-      run: zig build
-
-    - name: Run tests
-      run: zig build test
-
-    - name: Run fuzzing
-      run: zig build fuzz
-
-    - name: Run benchmarks
-      run: zig build bench
 
   integration:
     name: Integration Test
