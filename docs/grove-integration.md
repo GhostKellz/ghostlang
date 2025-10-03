@@ -6,11 +6,15 @@ Complete guide for integrating Ghostlang tree-sitter grammar into Grove editor f
 
 This guide covers how to integrate the Ghostlang tree-sitter grammar into Grove, enabling full syntax highlighting, code navigation, and language-aware features for Ghostlang scripts.
 
+**Tree-sitter Version:** 25.0+ (ABI 15)
+**Ghostlang Version:** 0.1.0
+
 ## Prerequisites
 
-- Grove editor with tree-sitter support
+- Grove editor with tree-sitter 25.0+ support
 - Ghostlang tree-sitter grammar (included in `tree-sitter-ghostlang/`)
 - Node.js and npm (for building the grammar)
+- Tree-sitter.json configuration (included)
 
 ## Installation
 
@@ -18,14 +22,20 @@ This guide covers how to integrate the Ghostlang tree-sitter grammar into Grove,
 
 ```bash
 cd tree-sitter-ghostlang
-npm install
-npm run generate
+npm install  # Installs tree-sitter-cli 25.0+
+npm run generate  # Generates parser with ABI 15
+npm test  # Verify grammar works
 ```
+
+**Tree-sitter 25.0 Changes:**
+- Grammar now uses `tree-sitter.json` for configuration (replaces package.json metadata)
+- ABI version 15 for improved performance and features
+- All query files are specified in tree-sitter.json
 
 ### 2. Copy Grammar to Grove
 
 ```bash
-# Copy the grammar to Grove's language directory
+# Copy the grammar to Grove's language directory (includes tree-sitter.json)
 cp -r tree-sitter-ghostlang/ path/to/grove/languages/ghostlang/
 ```
 
@@ -37,9 +47,10 @@ Add Ghostlang to Grove's language registry:
 // In Grove's language configuration
 const ghostlang_config = LanguageConfig{
     .name = "ghostlang",
-    .file_extensions = &[_][]const u8{ ".ghost" },
+    .file_extensions = &[_][]const u8{ ".ghost", ".gza" },
     .grammar_path = "languages/ghostlang",
     .comment_token = "//",
+    .abi_version = 15,  // Tree-sitter 25.0 ABI
 };
 ```
 
@@ -178,18 +189,28 @@ Try Grove's navigation features:
 
 ### Grammar Not Loading
 - Verify grammar files are in correct location
-- Check that grammar was built successfully
+- Check that grammar was built successfully with tree-sitter 25.0
 - Ensure Grove language registry includes Ghostlang
+- Verify `tree-sitter.json` is present and valid
+- Check ABI version compatibility (should be 15)
 
 ### Syntax Highlighting Issues
 - Verify `highlights.scm` query file is valid
 - Check for syntax errors in grammar definition
-- Ensure Grove can access query files
+- Ensure Grove can access query files specified in tree-sitter.json
+- Validate tree-sitter.json query paths are correct
 
 ### Performance Issues
 - Large files may cause parsing delays
-- Consider implementing incremental parsing
+- Tree-sitter 25.0 ABI 15 includes performance improvements
+- Use incremental parsing features (built into tree-sitter 25.0)
 - Profile grammar rules for efficiency
+
+### Tree-sitter 25.0 Migration Issues
+- Ensure tree-sitter.json exists with proper format
+- Verify ABI version 15 is set in Grove config
+- Check that all query files are listed in tree-sitter.json
+- Rebuild grammar after updating to 25.0
 
 ## Advanced Features
 
@@ -244,7 +265,15 @@ With this integration, Grove will provide:
 - Full syntax highlighting for Ghostlang scripts
 - Smart code navigation and text selection
 - Language-aware editing features
-- Proper file association and recognition
+- Proper file association and recognition (`.ghost`, `.gza`)
 - Special highlighting for editor API functions
+- Tree-sitter 25.0 ABI 15 performance and features
+
+**Tree-sitter 25.0 Benefits:**
+- Improved parsing performance with ABI 15
+- Better error recovery and incremental parsing
+- Standardized configuration via tree-sitter.json
+- Enhanced query system for more precise highlighting
+- Future-proof compatibility with Grove's tree-sitter 25.0 integration
 
 The tree-sitter grammar ensures accurate parsing and enables all modern editor features that Grove users expect from a fully supported programming language.

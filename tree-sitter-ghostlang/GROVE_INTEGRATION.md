@@ -4,6 +4,9 @@
 
 This tree-sitter grammar enables Grove to provide syntax highlighting, parsing, and navigation support for Ghostlang (`.ghost`) files.
 
+**Tree-sitter Version:** 25.0+ (ABI 15)
+**Language Version:** Ghostlang 0.1.0
+
 ## Features
 
 - **Syntax Highlighting**: Full syntax highlighting for Ghostlang constructs
@@ -49,6 +52,11 @@ insertText("hello");
 cp -r /path/to/ghostlang/tree-sitter-ghostlang vendor/grammars/ghostlang
 ```
 
+**Note:** The grammar includes a `tree-sitter.json` configuration file required by tree-sitter 25.0+ for ABI 15 support. This file defines:
+- Grammar metadata (version, license, authors)
+- File type associations (`.ghost`, `.gza`)
+- Query file mappings (highlights, locals, injections, textobjects)
+
 ### 2. Add to Grove's Language Registry
 
 ```zig
@@ -57,10 +65,11 @@ pub const LanguageConfig = struct {
     // ... existing languages
     .ghostlang => .{
         .name = "Ghostlang",
-        .extensions = &.{".ghost"},
+        .extensions = &.{".ghost", ".gza"},
         .tree_sitter = "ghostlang",
         .comment_prefix = "//",
         .parser_path = "vendor/grammars/ghostlang/src/parser.c",
+        .abi_version = 15,  // Tree-sitter 25.0 ABI
     },
 };
 ```
@@ -162,10 +171,15 @@ pub fn loadGhostlangPlugin(path: []const u8) !void {
 
 ```bash
 cd tree-sitter-ghostlang
-npm install
-npx tree-sitter generate
-npx tree-sitter test
+npm install  # Installs tree-sitter-cli 25.0+
+npx tree-sitter generate  # Generates parser with ABI 15
+npx tree-sitter test  # Runs corpus tests
 ```
+
+**Tree-sitter 25.0 Requirements:**
+- `tree-sitter.json` configuration file (included)
+- ABI version 15 for latest features and performance
+- Updated query file syntax (backwards compatible)
 
 ### Updating Queries
 
@@ -196,11 +210,12 @@ This makes Grove responsive even with large Ghostlang plugin files.
 ## Integration Status
 
 ✅ **Grammar Complete** - All Ghostlang syntax supported
+✅ **Tree-sitter 25.0** - Upgraded to ABI 15 with tree-sitter.json
 ✅ **Highlighting Queries** - Full syntax highlighting ready
 ✅ **Text Objects** - Smart selection implemented
 ✅ **Local Scopes** - Variable reference tracking
 ✅ **Language Injections** - Embedded language support
-✅ **Test Coverage** - Comprehensive test suite
-🔄 **Grove Integration** - Ready for Grove Phase 1
+✅ **Test Coverage** - Comprehensive test suite passing
+🔄 **Grove Integration** - Ready for Grove with tree-sitter 25.0
 
-The Ghostlang tree-sitter grammar is **production-ready** for Grove integration!
+The Ghostlang tree-sitter grammar is **production-ready** for Grove integration with tree-sitter 25.0!
