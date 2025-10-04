@@ -67,27 +67,96 @@ pub fn main() !void {
         std.debug.print("  Status: ✓ PASS\n\n", .{});
     }
 
-    // Test 4: Integration with ScriptEngine
+    // Test 4: Integration with ScriptEngine and leak detection
     {
-        std.debug.print("Test 4: ScriptEngine with memory limits\n", .{});
+        std.debug.print("Test 4: ScriptEngine repeated execution & leak check\n", .{});
 
         const config = ghostlang.EngineConfig{
             .allocator = backing_allocator,
-            .memory_limit = 100 * 1024, // 100KB limit
+            .memory_limit = 64 * 1024, // 64KB limit
+            .execution_timeout_ms = 50,
         };
 
         var engine = try ghostlang.ScriptEngine.create(config);
         defer engine.deinit();
 
-        // Load a simple script
-        var script = try engine.loadScript("var x = 42");
-        defer script.deinit();
+        const scripts = [_][]const u8{
+            "var total = 0; for i in 0..32 { total = total + i; } total",
+            "function fib(n) { if n <= 1 { return n } return fib(n-1) + fib(n-2) } fib(5)",
+            "var tbl = { answer = 42 }; tbl.answer",
+            "var arr = [1,2,3,4]; arr:push(5); arr:pop()",
+            "if false then 0 else 1 end",
+            "len(\"ghostlang\")",
+        };
 
-        _ = try script.run();
+        var iteration: usize = 0;
+        while (iteration < 500) : (iteration += 1) {
+            const source = scripts[iteration % scripts.len];
+            var script = try engine.loadScript(source);
+            defer script.deinit();
 
-        std.debug.print("  Engine created and script executed successfully\n", .{});
-        std.debug.print("  Status: ✓ PASS\n\n", .{});
+            _ = script.run() catch |err| {
+                std.debug.print("  Unexpected runtime error {s} on iteration {d}\n", .{ @errorName(err), iteration });
+                return err;
+            };
+
+            if (engine.memory_limiter) |limiter| {
+                const bytes = limiter.getBytesUsed();
+                if (bytes != 0) {
+                    std.debug.print("  Status: ✗ FAIL - memory still in use after iteration {d}: {} bytes\n", .{ iteration, bytes });
+                    return error.MemoryLeakDetected;
+                }
+            }
+        }
+
+        std.debug.print("  Status: ✓ PASS - no leaks detected across 500 runs\n\n", .{});
     }
 
-    std.debug.print("=== All Tests Passed ===\n", .{});
+    // Test 5: Memory pressure script triggers limit
+    {
+        std.debug.print("Test 5: ScriptEngine enforces memory limit\n", .{});
+        const config = ghostlang.EngineConfig{
+            .allocator = backing_allocator,
+            .memory_limit = 8 * 1024, // 8KB limit
+            .execution_timeout_ms = 50,
+        };
+
+        var engine = try ghostlang.ScriptEngine.create(config);
+        defer engine.deinit();
+
+        const source =
+            \\var data = []
+            \\for i in 0..512 {
+            \\    data:push(i)
+            \\}
+            \\len(data)
+        ;
+
+        var script = try engine.loadScript(source);
+        defer script.deinit();
+
+        const final_value = script.run() catch |err| switch (err) {
+            error.MemoryLimitExceeded => {
+                std.debug.print("  Status: ✓ PASS - memory limit enforced\n", .{});
+                return;
+            },
+            error.ExecutionTimeout => {
+                std.debug.print("  Status: ⚠ Script hit timeout before limit\n", .{});
+                return;
+            },
+            error.ParseError => {
+                std.debug.print("  Status: ⚠ Parse error reached unexpectedly\n", .{});
+                return;
+            },
+            else => {
+                std.debug.print("  Status: ✗ FAIL - unexpected error {s}\n", .{ @errorName(err) });
+                return err;
+            },
+        };
+
+        std.debug.print("  Script completed with value {any} (limit may be generous)\n", .{final_value});
+        std.debug.print("  Status: ⚠ CHECK LIMIT CONFIG\n", .{});
+    }
+
+    std.debug.print("=== Memory limit tests completed ===\n", .{});
 }

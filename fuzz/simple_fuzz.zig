@@ -1,103 +1,102 @@
-const ghostlang = @import("ghostlang");
 const std = @import("std");
+const ghostlang = @import("ghostlang");
 
-pub fn main() void {
-    // Comprehensive fuzzing test cases
-    const test_cases = [_][]const u8{
-        // Valid inputs
-        "3 + 4",
-        "var x = 10",
-        "var y = 3.14159",
-        "var z = x + y * 2",
-        "3 + 4 * 5 - 6 / 2",
-        "((((5))))",
+const MaxIterations = 10_000;
+const MaxScriptLength = 256;
+const Alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 +-*/%=(){}[]:,.;\n\t\r<>!";
 
-        // Edge cases - deeply nested
-        "((((((((((1))))))))))",
-        "1+2+3+4+5+6+7+8+9+10",
-
-        // Malformed - missing operators
-        "var x =",
-        "3 +",
-        "+ 5",
-        "var",
-
-        // Malformed - unbalanced parens
-        "(((",
-        ")))",
-        "((())",
-        "(()(",
-
-        // Malformed - invalid syntax
-        "if (",
-        "while {{{",
-        "))) (((  ",
-        "x ++ +++ y",
-        "***",
-        "///" ,
-
-        // Empty and whitespace
-        "",
-        "   ",
-        "\n\n\n",
-        "\t\t",
-
-        // Very long expressions
-        "1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1",
-
-        // Unicode and special chars (should fail gracefully)
-        "💀",
-        "var 変数 = 5",
-        "\x00\x01\x02",
-
-        // Numbers edge cases
-        "0",
-        "999999999999",
-        "0.000001",
-        ".5",
-        "5.",
-
-        // String-like (not yet supported, should fail gracefully)
-        "\"hello\"",
-        "'world'",
-        "`backtick`",
-    };
-
+pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    var prng = std.rand.DefaultPrng.init(@as(u64, @intCast(std.time.nanoTimestamp())));
+    const random = prng.random();
+
+    var iteration: usize = 0;
+    while (iteration < MaxIterations) : (iteration += 1) {
+        try fuzzOnce(random, allocator, iteration);
+    }
+}
+
+fn fuzzOnce(random: std.rand.Random, allocator: std.mem.Allocator, iteration: usize) !void {
+    const script_source = try makeCandidate(random, allocator, iteration);
+    defer allocator.free(script_source);
+
     const config = ghostlang.EngineConfig{
         .allocator = allocator,
-        .memory_limit = 10 * 1024 * 1024,
-        .execution_timeout_ms = 100,
+        .memory_limit = 256 * 1024,
+        .execution_timeout_ms = 10,
         .allow_io = false,
         .allow_syscalls = false,
         .deterministic = true,
     };
 
-    var engine = ghostlang.ScriptEngine.create(config) catch {
-        std.debug.print("Failed to create engine\n", .{});
-        return;
+    var engine = ghostlang.ScriptEngine.create(config) catch |err| {
+        std.log.err("fuzz iteration {d}: engine create failed: {s}", .{ iteration, @errorName(err) });
+        return err;
     };
     defer engine.deinit();
 
-    std.debug.print("Running {} fuzz test cases...\n", .{test_cases.len});
+    var script = engine.loadScript(script_source) catch |err| {
+        switch (err) {
+            error.ParseError => return,
+            error.MemoryLimitExceeded => return,
+            else => {
+                std.log.err("fuzz iteration {d}: loadScript unexpected {s} for script: {s}", .{ iteration, @errorName(err), script_source });
+                return err;
+            },
+        }
+    };
+    defer script.deinit();
 
-    for (test_cases, 0..) |input, i| {
-        var script = engine.loadScript(input) catch {
-            std.debug.print("[{}] Parse failed (expected): {s}\n", .{ i, input });
-            continue;
-        };
-        defer script.deinit();
+    _ = script.run() catch |err| {
+        switch (err) {
+            error.ParseError,
+            error.TypeError,
+            error.UndefinedVariable,
+            error.FunctionNotFound,
+            error.NotAFunction,
+            error.ExecutionTimeout,
+            error.MemoryLimitExceeded,
+            => return,
+            else => {
+                std.log.err("fuzz iteration {d}: run unexpected {s} for script: {s}", .{ iteration, @errorName(err), script_source });
+                return err;
+            },
+        }
+    };
+}
 
-        _ = script.run() catch {
-            std.debug.print("[{}] Execution failed (expected): {s}\n", .{ i, input });
-            continue;
-        };
-
-        std.debug.print("[{}] Success: {s}\n", .{ i, input });
+fn makeCandidate(random: std.rand.Random, allocator: std.mem.Allocator, iteration: usize) ![]u8 {
+    // Periodically replay structured seeds for coverage
+    const seeds = [_][]const u8{
+        "var x = 10",
+        "for i in 0..3 { i }",
+        "function add(a,b) { return a + b } add(1,2)",
+        "if true then 1 else 0 end",
+        "{ flag = true, values = [1,2,3] }",
+        "while false do break end",
+        "queue:push(1)",
+        "\"ghost\"",
+    };
+    if (iteration < seeds.len) {
+        return allocator.dupe(u8, seeds[iteration]) catch unreachable;
     }
 
-    std.debug.print("Fuzzing complete - no crashes!\n", .{});
+    var buffer = std.ArrayList(u8).init(allocator);
+    errdefer buffer.deinit();
+
+    const length = random.intRangeLessThan(usize, 0, MaxScriptLength);
+    var idx: usize = 0;
+    while (idx < length) : (idx += 1) {
+        const ch = Alphabet[random.int(u8) % Alphabet.len];
+        try buffer.append(ch);
+    }
+
+    if (buffer.items.len == 0) {
+        try buffer.appendSlice("var noop = 0");
+    }
+
+    return try buffer.toOwnedSlice();
 }

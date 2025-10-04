@@ -16,6 +16,13 @@ pub fn build(b: *std.Build) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+    const grove_path = b.option([]const u8, "grove-path", "Path to a Grove checkout used for integration testing");
+    const tree_sitter_lib = b.option([]const u8, "tree-sitter-lib", "Path to a prebuilt Tree-sitter static library");
+
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "grove_enabled", grove_path != null);
+    build_options.addOption([]const u8, "grove_path", grove_path orelse "");
+    build_options.addOption([]const u8, "tree_sitter_lib", tree_sitter_lib orelse "");
     // It's also possible to define more custom flags to toggle optional features
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
@@ -40,6 +47,7 @@ pub fn build(b: *std.Build) void {
         // which requires us to specify a target.
         .target = target,
     });
+    mod.addOptions("build_options", build_options);
 
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
@@ -82,6 +90,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    exe.root_module.addOptions("build_options", build_options);
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
@@ -121,6 +130,7 @@ pub fn build(b: *std.Build) void {
     const mod_tests = b.addTest(.{
         .root_module = mod,
     });
+    mod_tests.root_module.addOptions("build_options", build_options);
 
     // A run step that will run the test executable.
     const run_mod_tests = b.addRunArtifact(mod_tests);
@@ -131,6 +141,7 @@ pub fn build(b: *std.Build) void {
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
     });
+    exe_tests.root_module.addOptions("build_options", build_options);
 
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
@@ -154,6 +165,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    safety_demo.root_module.addOptions("build_options", build_options);
     b.installArtifact(safety_demo);
 
     const run_safety_demo_cmd = b.addRunArtifact(safety_demo);
@@ -172,6 +184,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    phase2_test.root_module.addOptions("build_options", build_options);
     b.installArtifact(phase2_test);
 
     const run_phase2_cmd = b.addRunArtifact(phase2_test);
@@ -190,6 +203,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    simple_fuzz.root_module.addOptions("build_options", build_options);
     b.installArtifact(simple_fuzz);
 
     const run_simple_fuzz_cmd = b.addRunArtifact(simple_fuzz);
@@ -208,6 +222,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    plugin_bench.root_module.addOptions("build_options", build_options);
     b.installArtifact(plugin_bench);
 
     const run_plugin_bench_cmd = b.addRunArtifact(plugin_bench);
@@ -226,6 +241,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    memory_test.root_module.addOptions("build_options", build_options);
     b.installArtifact(memory_test);
 
     const run_memory_test_cmd = b.addRunArtifact(memory_test);
@@ -244,6 +260,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    security_audit.root_module.addOptions("build_options", build_options);
     b.installArtifact(security_audit);
 
     const run_security_audit_cmd = b.addRunArtifact(security_audit);
@@ -262,6 +279,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    integration_test.root_module.addOptions("build_options", build_options);
     b.installArtifact(integration_test);
 
     const run_integration_test_cmd = b.addRunArtifact(integration_test);
@@ -280,6 +298,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    vm_profiler.root_module.addOptions("build_options", build_options);
     b.installArtifact(vm_profiler);
 
     const run_vm_profiler_cmd = b.addRunArtifact(vm_profiler);
@@ -298,6 +317,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    plugin_scenarios.root_module.addOptions("build_options", build_options);
     b.installArtifact(plugin_scenarios);
 
     const run_plugin_scenarios_cmd = b.addRunArtifact(plugin_scenarios);

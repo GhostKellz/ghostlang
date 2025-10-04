@@ -48,6 +48,13 @@ pub fn main() !void {
         failed += 1;
     }
 
+    // Test 6: Control flow extensions (numeric for, repeat/until)
+    if (try testControlFlowExtensions(allocator)) {
+        passed += 1;
+    } else {
+        failed += 1;
+    }
+
     std.debug.print("\n=== Integration Test Summary ===\n", .{});
     std.debug.print("Passed: {}\n", .{passed});
     std.debug.print("Failed: {}\n", .{failed});
@@ -254,4 +261,48 @@ fn testSecurityLevels(allocator: std.mem.Allocator) !bool {
 
     std.debug.print("  ✓ PASS - All security levels working\n\n", .{});
     return true;
+}
+
+fn testControlFlowExtensions(allocator: std.mem.Allocator) !bool {
+    std.debug.print("Test 6: Control Flow Extensions\n", .{});
+
+    const config = ghostlang.EngineConfig{
+        .allocator = allocator,
+    };
+
+    var engine = try ghostlang.ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const script =
+        \\var forward = 0
+        \\for i = 1, 5 do
+        \\    forward = forward + i
+        \\end
+        \\var backward = 0
+        \\for j = 5, 1, -2 do
+        \\    backward = backward + j
+        \\end
+        \\var countdown = 3
+        \\repeat
+        \\    backward = backward - countdown
+        \\    countdown = countdown - 1
+        \\until countdown <= 0
+        \\forward + backward
+    ;
+
+    var loaded_script = try engine.loadScript(script);
+    defer loaded_script.deinit();
+
+    const result = try loaded_script.run();
+
+    if (result == .number and result.number == 18) {
+        std.debug.print("  ✓ PASS - Dual syntax control flow is operational\n\n", .{});
+        return true;
+    }
+
+    switch (result) {
+        .number => |value| std.debug.print("  ✗ FAIL - Expected 18, got {}\n\n", .{value}),
+        else => std.debug.print("  ✗ FAIL - Expected number, got {s}\n\n", .{ @tagName(result) }),
+    }
+    return false;
 }

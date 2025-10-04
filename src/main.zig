@@ -39,7 +39,8 @@ pub fn main() !void {
         .boolean => |b| std.debug.print("{}\n", .{b}),
         .number => |n| std.debug.print("{d}\n", .{n}),
         .string => |s| std.debug.print("{s}\n", .{s}),
-        .function => std.debug.print("<function>\n", .{}),
+    .function => std.debug.print("<function>\n", .{}),
+    .script_function => std.debug.print("<script_function>\n", .{}),
         .table => std.debug.print("<table>\n", .{}),
         .array => std.debug.print("<array>\n", .{}),
     }

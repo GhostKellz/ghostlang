@@ -8,16 +8,29 @@ Ghostlang draws heavy inspiration from Lua but is specifically designed for edit
 
 ## Table of Contents
 
+1. [Phase A Dual-Syntax Migration Outline](#phase-a-dual-syntax-migration-outline)
 1. [Quick Syntax Comparison](#quick-syntax-comparison)
-2. [Variables & Types](#variables--types)
-3. [Control Flow](#control-flow)
-4. [Functions](#functions)
-5. [Tables vs. Ghostlang Data Structures](#tables-vs-ghostlang-data-structures)
-6. [String Operations](#string-operations)
-7. [Common Patterns](#common-patterns)
-8. [Editor Integration](#editor-integration)
+1. [Variables & Types](#variables--types)
+1. [Control Flow](#control-flow)
+1. [Functions](#functions)
+1. [Tables vs. Ghostlang Data Structures](#tables-vs-ghostlang-data-structures)
+1. [String Operations](#string-operations)
+1. [Common Patterns](#common-patterns)
+1. [Editor Integration](#editor-integration)
 
 ---
+
+## Phase A Dual-Syntax Migration Outline
+
+Ghostlang Phase A unlocks feature parity for Lua-style control flow while keeping the existing brace syntax intact. Use this checklist to stage your migration:
+
+1. **Audit control-flow blocks** – Identify every `if`, `elseif`, `else`, and `while` statement. Confirm whether the branch uses braces or Lua keywords today and decide whether to standardize per file or per statement.
+2. **Plan loop upgrades** – Inventory numeric and generic `for` loops plus any prospective `repeat ... until` patterns. Brace-only loops should migrate to the new dual-syntax forms once the runtime lands.
+3. **Function declarations** – Map global vs. local functions. Note anonymous `function (...) ... end` expressions that need compatibility coverage.
+4. **Keyword review** – Document `break`, `continue`, and other auxiliary keywords inside each block. Phase A enforces consistent style per construct and ensures scope unwinding works in both syntaxes.
+5. **Testing & linting strategy** – Prepare unit tests or fixtures that exercise both brace and Lua syntax for critical paths. Plan to run them against the `feature/parser-phase-a` branch during adoption.
+
+Track findings in your project tracker so implementation can proceed once the Phase A branch is ready.
 
 ## Quick Syntax Comparison
 

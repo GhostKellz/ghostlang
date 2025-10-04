@@ -9,6 +9,30 @@ This guide covers how to integrate the Ghostlang tree-sitter grammar into Grove,
 **Tree-sitter Version:** 25.0+ (ABI 15)
 **Ghostlang Version:** 0.1.0
 
+## Phase A Grammar Update Prep
+
+Upcoming Phase A work introduces full Lua-style control-flow support. Prepare the Grove grammar and test collateral with this checklist:
+
+- **Keyword inventory** – Ensure the lexer lists `then`, `elseif`, `else`, `do`, `end`, `repeat`, `until`, `in`, and `local` as reserved tokens alongside the existing brace keywords.
+- **Loop rules** – Add parsing rules for `repeat ... until` blocks and distinguish numeric vs. generic `for` loops (`for name = start, stop[, step]` and `for name, name in iterator`).
+- **Function forms** – Support `local function` declarations and anonymous `function (...) ... end` expressions as statement or expression nodes.
+- **Scope queries** – Update `locals.scm` to capture variables introduced by numeric/generic `for`, `repeat` loops, and local functions.
+- **Highlighting** – Extend `highlights.scm` to color the new Lua keywords and treat iterator identifiers consistently.
+- **Fixtures** – Create paired sample files (`phase_a_brace.ghost`, `phase_a_lua.ghost`) covering every construct in both syntaxes for regression testing.
+- **CI hooks** – Add new fixtures to the grammar's `npm test` suite and wire Grove's smoke tests to load both samples.
+
+Keep these updates on the `feature/parser-phase-a` branch so grammar work stays synchronized with parser changes.
+
+### Immediate follow-up (main branch)
+
+With numeric `for` loops and `repeat ... until` now live in Ghostlang’s main branch, Grove should:
+
+- **Grammar** – Extend the existing Ghostlang grammar rules to accept `for name = start, stop[, step] do ... end` (including negative step values) and the new `repeat` block that terminates with `until <expr>`.
+- **AST fields** – Emit dedicated nodes for numeric for clauses (`numeric_for`, `numeric_for_clause`, or equivalent) so LSP tooling can expose loop bounds and steps.
+- **Queries** – Update `locals.scm` to mark the loop control variable as scoped and to register any auxiliary `__for_*` temporaries as internal so they stay hidden from navigation.
+- **Highlights** – Add keyword captures for `repeat`, `until`, and the `do` token used by the numeric loop. Ensure iterator variables receive the same highlight class across range, numeric, and generic forms.
+- **Tests** – Add fixtures mirroring the new integration test (`tests/integration_test.zig` → `Test 6`) to guarantee Grove stays in sync with runtime behavior.
+
 ## Prerequisites
 
 - Grove editor with tree-sitter 25.0+ support

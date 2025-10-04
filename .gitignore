@@ -6,4 +6,12 @@ TODO.md
 CLAUDE.md
 .zig-cache/
 archive/
-roadmap/ 
+roadmap/
+CODEX.md
+GSH_NOTES.md
+GSH_TODO_GUIDE.md
+GSH_ADDITIONAL.md
+GSH_FFI_ADDITIONS.md
+GSH_GLANG_SYNTAX.md 
+GSH_NEEDS.md 
+

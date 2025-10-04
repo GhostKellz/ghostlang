@@ -156,48 +156,117 @@ fn testExecutionTimeout(allocator: std.mem.Allocator) !bool {
 fn testIORestriction(allocator: std.mem.Allocator) !bool {
     std.debug.print("Test 3: IO Restriction Enforcement\n", .{});
 
-    const config = ghostlang.EngineConfig{
+    const restricted_config = ghostlang.EngineConfig{
         .allocator = allocator,
         .allow_io = false, // IO disabled
     };
 
-    var engine = try ghostlang.ScriptEngine.create(config);
-    defer engine.deinit();
+    var restricted = try ghostlang.ScriptEngine.create(restricted_config);
+    defer restricted.deinit();
 
-    // Currently Ghostlang doesn't have IO functions, so this test passes by default
-    std.debug.print("  ✓ PASS - No IO primitives exposed\n\n", .{});
+    const restricted_result = restricted.security.checkIOAllowed();
+    if (restricted_result) |_| {
+        std.debug.print("  ✗ FAIL - IO allowed despite restriction\n\n", .{});
+        return false;
+    } else |err| {
+        if (err != ghostlang.ExecutionError.IONotAllowed) {
+            std.debug.print("  ✗ FAIL - Unexpected error: {}\n\n", .{err});
+            return false;
+        }
+    }
+
+    const permissive_config = ghostlang.EngineConfig{
+        .allocator = allocator,
+        .allow_io = true,
+    };
+
+    var permissive = try ghostlang.ScriptEngine.create(permissive_config);
+    defer permissive.deinit();
+
+    permissive.security.checkIOAllowed() catch |err| {
+        std.debug.print("  ✗ FAIL - IO blocked unexpectedly: {}\n\n", .{err});
+        return false;
+    };
+
+    std.debug.print("  ✓ PASS - IO restrictions enforced correctly\n\n", .{});
     return true;
 }
 
 fn testSyscallRestriction(allocator: std.mem.Allocator) !bool {
     std.debug.print("Test 4: Syscall Restriction Enforcement\n", .{});
 
-    const config = ghostlang.EngineConfig{
+    const restricted_config = ghostlang.EngineConfig{
         .allocator = allocator,
         .allow_syscalls = false, // Syscalls disabled
     };
 
-    var engine = try ghostlang.ScriptEngine.create(config);
-    defer engine.deinit();
+    var restricted = try ghostlang.ScriptEngine.create(restricted_config);
+    defer restricted.deinit();
 
-    // Currently Ghostlang doesn't have syscall primitives
-    std.debug.print("  ✓ PASS - No syscall primitives exposed\n\n", .{});
+    const restricted_result = restricted.security.checkSyscallAllowed();
+    if (restricted_result) |_| {
+        std.debug.print("  ✗ FAIL - Syscalls allowed despite restriction\n\n", .{});
+        return false;
+    } else |err| {
+        if (err != ghostlang.ExecutionError.SyscallNotAllowed) {
+            std.debug.print("  ✗ FAIL - Unexpected error: {}\n\n", .{err});
+            return false;
+        }
+    }
+
+    const permissive_config = ghostlang.EngineConfig{
+        .allocator = allocator,
+        .allow_syscalls = true,
+    };
+
+    var permissive = try ghostlang.ScriptEngine.create(permissive_config);
+    defer permissive.deinit();
+
+    permissive.security.checkSyscallAllowed() catch |err| {
+        std.debug.print("  ✗ FAIL - Syscalls blocked unexpectedly: {}\n\n", .{err});
+        return false;
+    };
+
+    std.debug.print("  ✓ PASS - Syscall restrictions enforced correctly\n\n", .{});
     return true;
 }
 
 fn testDeterministicMode(allocator: std.mem.Allocator) !bool {
     std.debug.print("Test 5: Deterministic Mode Enforcement\n", .{});
 
-    const config = ghostlang.EngineConfig{
+    const restricted_config = ghostlang.EngineConfig{
         .allocator = allocator,
         .deterministic = true, // Deterministic mode
     };
 
-    var engine = try ghostlang.ScriptEngine.create(config);
-    defer engine.deinit();
+    var restricted = try ghostlang.ScriptEngine.create(restricted_config);
+    defer restricted.deinit();
 
-    // Currently Ghostlang doesn't have time/random functions
-    std.debug.print("  ✓ PASS - No non-deterministic primitives exposed\n\n", .{});
+    const restricted_result = restricted.security.checkNonDeterministicAllowed();
+    if (restricted_result) |_| {
+        std.debug.print("  ✗ FAIL - Non-deterministic features allowed\n\n", .{});
+        return false;
+    } else |err| {
+        if (err != ghostlang.ExecutionError.SecurityViolation) {
+            std.debug.print("  ✗ FAIL - Unexpected error: {}\n\n", .{err});
+            return false;
+        }
+    }
+
+    const permissive_config = ghostlang.EngineConfig{
+        .allocator = allocator,
+        .deterministic = false,
+    };
+
+    var permissive = try ghostlang.ScriptEngine.create(permissive_config);
+    defer permissive.deinit();
+
+    permissive.security.checkNonDeterministicAllowed() catch |err| {
+        std.debug.print("  ✗ FAIL - Deterministic check raised unexpectedly: {}\n\n", .{err});
+        return false;
+    };
+
+    std.debug.print("  ✓ PASS - Deterministic mode enforced correctly\n\n", .{});
     return true;
 }
 

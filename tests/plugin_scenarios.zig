@@ -164,7 +164,8 @@ fn testExpandSelection(allocator: std.mem.Allocator) !bool {
         \\var sel_start = 10
         \\var sel_end = 20
         \\var expand_by = 5
-        \\(sel_end - sel_start) + (expand_by * 2)
+        \\var total = (sel_end - sel_start) + (expand_by * 2)
+        \\total
     ;
 
     var loaded = try engine.loadScript(script);
@@ -192,7 +193,8 @@ fn testShrinkSelection(allocator: std.mem.Allocator) !bool {
         \\var sel_start = 10
         \\var sel_end = 30
         \\var shrink_by = 5
-        \\(sel_end - sel_start) - (shrink_by * 2)
+        \\var remaining = (sel_end - sel_start) - (shrink_by * 2)
+        \\remaining
     ;
 
     var loaded = try engine.loadScript(script);
@@ -220,7 +222,8 @@ fn testSmartSelect(allocator: std.mem.Allocator) !bool {
         \\var cursor = 15
         \\var word_start = 10
         \\var word_end = 20
-        \\word_end - word_start
+        \\var width = word_end - word_start
+        \\width
     ;
 
     var loaded = try engine.loadScript(script);

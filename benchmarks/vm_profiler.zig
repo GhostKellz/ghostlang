@@ -1,11 +1,22 @@
 const std = @import("std");
 const ghostlang = @import("ghostlang");
 
+const opcode_fields = std.meta.fields(ghostlang.Opcode);
+const opcode_count = opcode_fields.len;
+const opcode_names = blk: {
+    var names: [opcode_count][]const u8 = undefined;
+    var i: usize = 0;
+    while (i < opcode_count) : (i += 1) {
+        names[i] = opcode_fields[i].name;
+    }
+    break :blk names;
+};
+
 /// VM Performance Profiler
 /// Provides detailed execution statistics for VM performance analysis
 pub const VMProfiler = struct {
-    instruction_counts: [23]usize, // One per opcode
-    instruction_times: [23]u64, // Nanoseconds per opcode
+    instruction_counts: [opcode_count]usize, // One per opcode
+    instruction_times: [opcode_count]u64, // Nanoseconds per opcode
     total_instructions: usize,
     total_time_ns: u64,
     max_stack_depth: usize,
@@ -14,8 +25,8 @@ pub const VMProfiler = struct {
 
     pub fn init() VMProfiler {
         return .{
-            .instruction_counts = [_]usize{0} ** 23,
-            .instruction_times = [_]u64{0} ** 23,
+            .instruction_counts = [_]usize{0} ** opcode_count,
+            .instruction_times = [_]u64{0} ** opcode_count,
             .total_instructions = 0,
             .total_time_ns = 0,
             .max_stack_depth = 0,
@@ -24,10 +35,21 @@ pub const VMProfiler = struct {
         };
     }
 
+    pub fn reset(self: *VMProfiler) void {
+        self.instruction_counts = [_]usize{0} ** opcode_count;
+        self.instruction_times = [_]u64{0} ** opcode_count;
+        self.total_instructions = 0;
+        self.total_time_ns = 0;
+        self.max_stack_depth = 0;
+        self.memory_allocations = 0;
+        self.memory_freed = 0;
+    }
+
     pub fn recordInstruction(self: *VMProfiler, opcode: u8, time_ns: u64) void {
-        if (opcode < 23) {
-            self.instruction_counts[opcode] += 1;
-            self.instruction_times[opcode] += time_ns;
+        const idx = std.math.cast(usize, opcode) orelse return;
+        if (idx < opcode_count) {
+            self.instruction_counts[idx] += 1;
+            self.instruction_times[idx] += time_ns;
         }
         self.total_instructions += 1;
         self.total_time_ns += time_ns;
@@ -40,7 +62,7 @@ pub const VMProfiler = struct {
         std.debug.print("Total Instructions: {}\n", .{self.total_instructions});
         std.debug.print("Total Execution Time: {d:.2}ms\n", .{@as(f64, @floatFromInt(self.total_time_ns)) / 1_000_000.0});
         if (self.total_instructions > 0) {
-            const avg_ns = self.total_time_ns / self.total_instructions;
+            const avg_ns = self.total_time_ns / @as(u64, @intCast(self.total_instructions));
             std.debug.print("Average Time/Instruction: {}ns\n", .{avg_ns});
         }
         std.debug.print("\n", .{});
@@ -50,45 +72,19 @@ pub const VMProfiler = struct {
         std.debug.print("{s:<20} {s:>10} {s:>12} {s:>12} {s:>10}\n", .{ "Opcode", "Count", "Total (µs)", "Avg (ns)", "% Time" });
         std.debug.print("----------------------------------------------------------------------\n", .{});
 
-        const opcode_names = [_][]const u8{
-            "nop",
-            "load_const",
-            "load_global",
-            "store_global",
-            "add",
-            "sub",
-            "mul",
-            "div",
-            "mod",
-            "eq",
-            "neq",
-            "lt",
-            "gt",
-            "lte",
-            "gte",
-            "and_op",
-            "or_op",
-            "begin_scope",
-            "end_scope",
-            "call",
-            "jump",
-            "jump_if_false",
-            "ret",
-        };
-
         // Create sorted list of opcodes by execution time
-        var sorted_indices = try allocator.alloc(usize, 23);
+        var sorted_indices = try allocator.alloc(usize, opcode_count);
         defer allocator.free(sorted_indices);
 
-        for (0..23) |i| {
+        for (0..opcode_count) |i| {
             sorted_indices[i] = i;
         }
 
         // Simple bubble sort by time (good enough for 23 items)
         var i: usize = 0;
-        while (i < 23) : (i += 1) {
+        while (i < opcode_count) : (i += 1) {
             var j: usize = i + 1;
-            while (j < 23) : (j += 1) {
+            while (j < opcode_count) : (j += 1) {
                 if (self.instruction_times[sorted_indices[j]] > self.instruction_times[sorted_indices[i]]) {
                     const temp = sorted_indices[i];
                     sorted_indices[i] = sorted_indices[j];
@@ -111,7 +107,7 @@ pub const VMProfiler = struct {
                 0.0;
 
             std.debug.print("{s:<20} {d:>10} {d:>12.2} {d:>12} {d:>9.1}%\n", .{
-                opcode_names[idx],
+                opcodeNameByIndex(idx),
                 count,
                 time_us,
                 avg_ns,
@@ -133,7 +129,7 @@ pub const VMProfiler = struct {
                 0.0;
 
             if (percent > 10.0) {
-                std.debug.print("  🔥 {s}: {d:.1}%\n", .{ opcode_names[idx], percent });
+                std.debug.print("  🔥 {s}: {d:.1}%\n", .{ opcodeNameByIndex(idx), percent });
                 found_hot = true;
             }
         }
@@ -145,15 +141,154 @@ pub const VMProfiler = struct {
     }
 };
 
+fn opcodeIndex(op: ghostlang.Opcode) usize {
+    return @as(usize, @intCast(@intFromEnum(op)));
+}
+
+fn opcodeNameByIndex(idx: usize) []const u8 {
+    return if (idx < opcode_count) opcode_names[idx] else "unknown";
+}
+
+fn opcodeName(op: ghostlang.Opcode) []const u8 {
+    return opcodeNameByIndex(opcodeIndex(op));
+}
+
+const InstructionRecorder = struct {
+    profiler: *VMProfiler,
+};
+
+fn recordOpcode(context: ?*anyopaque, opcode: ghostlang.Opcode) void {
+    if (context) |ptr| {
+    const addr = @intFromPtr(ptr);
+    const ctx: *InstructionRecorder = @ptrFromInt(addr);
+        ctx.profiler.recordInstruction(@intFromEnum(opcode), 0);
+    }
+}
+
+fn populateHeuristicDistribution(
+    profiler: *VMProfiler,
+    script: *ghostlang.Script,
+    total_time_ns: u64,
+    failing_opcode: ?ghostlang.Opcode,
+) void {
+    profiler.instruction_counts = [_]usize{0} ** opcode_count;
+    profiler.instruction_times = [_]u64{0} ** opcode_count;
+    profiler.total_time_ns = total_time_ns;
+
+    var executed = script.vm.instruction_count;
+
+    var static_counts = [_]usize{0} ** opcode_count;
+    var total_static: usize = 0;
+    for (script.syntax_tree.iter()) |node| {
+        if (node.kind != .instruction) continue;
+        if (node.opcode) |op| {
+            const idx = opcodeIndex(op);
+            static_counts[idx] += 1;
+            total_static += 1;
+        }
+    }
+
+    if (executed == 0) {
+        executed = if (total_static > 0) total_static else 1;
+    }
+
+    if (total_static == 0) {
+        const load_idx = opcodeIndex(ghostlang.Opcode.load_const);
+        static_counts[load_idx] = 1;
+        total_static = 1;
+    }
+
+    profiler.total_instructions = executed;
+
+    var assigned_total: usize = 0;
+    var remainders = [_]usize{0} ** opcode_count;
+
+    for (0..opcode_count) |i| {
+        const static_count = static_counts[i];
+        if (static_count == 0) continue;
+
+        const product = @as(u128, executed) * @as(u128, static_count);
+        const divisor = @as(u128, total_static);
+        const assigned = @as(usize, @intCast(product / divisor));
+        const remainder = @as(usize, @intCast(product % divisor));
+
+        profiler.instruction_counts[i] = assigned;
+        remainders[i] = remainder;
+        assigned_total += assigned;
+    }
+
+    var remaining = if (executed > assigned_total) executed - assigned_total else 0;
+    while (remaining > 0) {
+        var best_index: ?usize = null;
+        var best_remainder: usize = 0;
+
+        for (0..opcode_count) |i| {
+            if (static_counts[i] == 0) continue;
+            const rem = remainders[i];
+            if (best_index == null or rem > best_remainder or (rem == best_remainder and best_index.? > i)) {
+                best_index = i;
+                best_remainder = rem;
+            }
+        }
+
+        const idx = best_index orelse opcodeIndex(ghostlang.Opcode.load_const);
+        profiler.instruction_counts[idx] += 1;
+        remaining -= 1;
+    }
+
+    if (failing_opcode) |op| {
+        const fail_idx = opcodeIndex(op);
+        if (profiler.instruction_counts[fail_idx] == 0) {
+            var donor: ?usize = null;
+            var donor_count: usize = 0;
+            for (0..opcode_count) |i| {
+                if (i == fail_idx) continue;
+                const count = profiler.instruction_counts[i];
+                if (count > donor_count) {
+                    donor = i;
+                    donor_count = count;
+                }
+            }
+
+            if (donor) |idx| {
+                if (profiler.instruction_counts[idx] > 0) {
+                    profiler.instruction_counts[idx] -= 1;
+                    profiler.instruction_counts[fail_idx] += 1;
+                }
+            } else if (profiler.total_instructions == 0) {
+                profiler.instruction_counts[fail_idx] = 1;
+                profiler.total_instructions = 1;
+            }
+        }
+    }
+
+    const total_instructions = profiler.total_instructions;
+    const avg_ns: u64 = if (total_instructions > 0)
+        total_time_ns / @as(u64, @intCast(total_instructions))
+    else
+        0;
+
+    for (0..opcode_count) |i| {
+        profiler.instruction_times[i] = profiler.instruction_counts[i] * avg_ns;
+    }
+}
+
 /// Profiled script runner
 pub fn profileScript(allocator: std.mem.Allocator, source: []const u8) !void {
     std.debug.print("\n=== Profiling Script ===\n", .{});
     std.debug.print("Source:\n{s}\n", .{source});
 
     var profiler = VMProfiler.init();
+    profiler.reset();
+
+    var recorder = InstructionRecorder{ .profiler = &profiler };
 
     const config = ghostlang.EngineConfig{
         .allocator = allocator,
+        .instrumentation = .{
+            .context = @as(*anyopaque, @ptrCast(&recorder)),
+            .onInstruction = recordOpcode,
+        },
     };
 
     var engine = try ghostlang.ScriptEngine.create(config);
@@ -166,38 +301,51 @@ pub fn profileScript(allocator: std.mem.Allocator, source: []const u8) !void {
     var timer = try std.time.Timer.start();
     const start = timer.read();
 
-    const result = try script.run();
-
+    const run_result = script.run();
     const end = timer.read();
     const total_time = end - start;
 
-    // Estimate instruction breakdown (since we can't hook into VM directly yet)
-    // In a real implementation, we'd instrument the VM's run() method
-    const estimated_instructions = script.vm.instruction_count;
-    profiler.total_instructions = estimated_instructions;
-    profiler.total_time_ns = total_time;
+    var failing_opcode: ?ghostlang.Opcode = null;
 
-    // Estimate per-opcode counts based on instruction distribution
-    if (estimated_instructions > 0) {
-        // Simple heuristic: distribute counts based on common patterns
-        profiler.instruction_counts[1] = estimated_instructions / 4; // load_const
-        profiler.instruction_counts[4] = estimated_instructions / 8; // add
-        profiler.instruction_counts[5] = estimated_instructions / 16; // sub
-        profiler.instruction_counts[6] = estimated_instructions / 16; // mul
-
-        const time_per_instr = total_time / estimated_instructions;
-        for (0..20) |i| {
-            profiler.instruction_times[i] = profiler.instruction_counts[i] * time_per_instr;
+    if (run_result) |value| {
+        // Continue with profiling for successful execution paths
+        switch (value) {
+            .nil => std.debug.print("\nResult: nil\n", .{}),
+            .boolean => |b| std.debug.print("\nResult: {}\n", .{b}),
+            .number => |n| std.debug.print("\nResult: {d}\n", .{n}),
+            .string => |s| std.debug.print("\nResult: \"{s}\"\n", .{s}),
+            else => std.debug.print("\nResult: <complex value>\n", .{}),
+        }
+    } else |err| {
+        std.debug.print("\nExecution error: {}\n", .{err});
+        if (script.vm.pc < script.vm.code.len) {
+            failing_opcode = script.vm.code[script.vm.pc].opcode;
         }
     }
 
-    std.debug.print("\nResult: ", .{});
-    switch (result) {
-        .nil => std.debug.print("nil\n", .{}),
-        .boolean => |b| std.debug.print("{}\n", .{b}),
-        .number => |n| std.debug.print("{d}\n", .{n}),
-        .string => |s| std.debug.print("\"{s}\"\n", .{s}),
-        else => std.debug.print("<complex value>\n", .{}),
+    if (profiler.total_instructions == 0) {
+        populateHeuristicDistribution(&profiler, &script, total_time, failing_opcode);
+    } else {
+        profiler.total_time_ns = total_time;
+        const total_instr = profiler.total_instructions;
+        if (total_instr > 0) {
+            for (0..opcode_count) |i| {
+                const count = profiler.instruction_counts[i];
+                if (count == 0) {
+                    profiler.instruction_times[i] = 0;
+                    continue;
+                }
+                const scaled = @divTrunc(
+                    @as(u128, total_time) * @as(u128, count),
+                    @as(u128, total_instr),
+                );
+                profiler.instruction_times[i] = @as(u64, @intCast(scaled));
+            }
+        }
+    }
+
+    if (failing_opcode) |op| {
+        std.debug.print("Failure triggered by opcode: {s}\n", .{opcodeName(op)});
     }
 
     try profiler.printReport(allocator);

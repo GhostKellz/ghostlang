@@ -76,3 +76,20 @@ zig build
 ## File Extension
 
 Scripts use the `.gza` extension (ghostlang zig assembly).
+
+## QA & Security Testing
+
+### Security audit toggles
+
+The security audit suite (`security/sandbox_audit.zig`) is the canonical checklist for verifying gShell and plugin sandboxes. Each test now exercises **both** sides of the security context so regressions are caught immediately.
+
+- Run the suite with `zig build security`.
+- Every scenario configures a **restricted** engine (`allow_io = false`, `allow_syscalls = false`, `deterministic = true`) and a **permissive** engine where the same capability is explicitly allowed.
+- When adding new host integrations (filesystem, networking, timers, etc.), extend the audit to assert the correct `ExecutionError` is raised in restricted mode and that the action succeeds when permitted.
+- Keep scripts lightweight—the audit is designed to fail fast and give actionable output while gating gShell deployments.
+
+For broader QA coverage see:
+
+- `zig build test-integration` – end-to-end plugin flows exercised the way gShell loads multiple extensions.
+- `zig build test-plugins` – scenario library for editor ergonomics.
+- `zig build bench` / `zig build profile` – performance tracking, including the VM profiler reports enriched for error-path visibility.
