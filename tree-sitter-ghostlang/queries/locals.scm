@@ -1,19 +1,45 @@
-; Local scope queries for Ghostlang
+; Local scope queries for Ghostlang v0.1.0
 ; These help Grove understand variable scoping and references
 
 ; Scopes
 (source_file) @local.scope
 (function_declaration body: (_) @local.scope)
+(local_function_declaration body: (_) @local.scope)
 (block_statement) @local.scope
+(lua_block) @local.scope
+(if_statement) @local.scope
+(while_statement) @local.scope
+(for_statement) @local.scope
+(repeat_statement) @local.scope
 
 ; Function definitions create their own scope
 (function_declaration
   name: (identifier) @local.definition.function
   body: (_) @local.scope)
 
+(local_function_declaration
+  name: (identifier) @local.definition.function
+  body: (_) @local.scope)
+
 ; Variable definitions
 (variable_declaration
   name: (identifier) @local.definition.variable)
+
+(local_variable_declaration
+  name: (identifier) @local.definition.variable)
+
+; For loop variables (C-style)
+(for_statement
+  init: (variable_declaration
+    name: (identifier) @local.definition.variable))
+
+; For loop variables (Lua-style numeric)
+(for_statement
+  variable: (identifier) @local.definition.variable)
+
+; For loop variables (Lua-style generic - pairs/ipairs)
+(for_statement
+  variables: (identifier) @local.definition.variable)
 
 ; Parameter definitions
 (parameter_list

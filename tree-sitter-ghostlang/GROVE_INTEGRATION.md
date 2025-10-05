@@ -2,10 +2,12 @@
 
 ## Overview
 
-This tree-sitter grammar enables Grove to provide syntax highlighting, parsing, and navigation support for Ghostlang (`.ghost`) files.
+This tree-sitter grammar enables Grove to provide syntax highlighting, parsing, and navigation support for Ghostlang (`.gza` and `.ghost`) files.
 
 **Tree-sitter Version:** 25.0+ (ABI 15)
 **Language Version:** Ghostlang 0.1.0
+**Primary Extension:** `.gza`
+**Alias Extension:** `.ghost`
 
 ## Features
 
@@ -17,13 +19,89 @@ This tree-sitter grammar enables Grove to provide syntax highlighting, parsing, 
 
 ## Grammar Support
 
-The grammar covers all Ghostlang language features:
+The grammar covers all Ghostlang v0.1.0 language features with **dual syntax support**:
 
-### Basic Constructs
-- Variable declarations: `var x = 5;`
-- Function declarations: `function name() { }`
-- Control flow: `if`, `while`, `for` statements
-- Expressions: arithmetic, logical, comparison operators
+### Dual Syntax - Lua and C-Style
+
+Ghostlang supports both syntaxes seamlessly:
+
+**Lua-Style:**
+```lua
+-- Lua-style if-then-end
+if x > 5 then
+  print("big")
+elseif x == 5 then
+  print("equal")
+else
+  print("small")
+end
+
+-- Lua-style while loop
+while count < 10 do
+  count = count + 1
+end
+
+-- Numeric for loop
+for i = 1, 10, 2 do
+  print(i)
+end
+
+-- Generic for with pairs/ipairs
+for k, v in pairs(table) do
+  print(k, v)
+end
+
+-- Repeat-until loop
+repeat
+  x = x + 1
+until x >= 10
+
+-- Local variables and functions
+local count = 0
+local function helper(x)
+  return x * 2
+end
+```
+
+**C-Style:**
+```c
+// C-style if with braces
+if (x > 5) {
+  print("big");
+} else {
+  print("small");
+}
+
+// C-style while loop
+while (count < 10) {
+  count++;
+}
+
+// C-style for loop
+for (var i = 0; i < 10; i++) {
+  print(i);
+}
+```
+
+### Variable Declarations
+- C-style: `var x = 5;`
+- Lua-style: `var x = 5` or `local x = 5`
+
+### Function Declarations
+- C-style: `function name() { ... }`
+- Lua-style: `function name() ... end`
+- Local functions: `local function name() ... end`
+
+### Operators
+- **Lua-style**: `and`, `or`, `not`, `~=`, `..` (string concat)
+- **C-style**: `&&`, `||`, `!`, `!=`, `+` (also works for strings)
+- **Universal**: `==`, `<`, `>`, `<=`, `>=`, `+`, `-`, `*`, `/`, `%`
+
+### Control Flow
+- Lua-style: `if...then...elseif...else...end`
+- C-style: `if (cond) { } else { }`
+- Loops: `while...do...end`, `for...do...end`, `repeat...until`
+- Keywords: `break`, `continue`, `return`
 
 ### Data Types
 - Numbers: `42`, `3.14`, `1e10`
@@ -33,14 +111,39 @@ The grammar covers all Ghostlang language features:
 - Objects: `{key: value}`
 - Arrays: `[1, 2, 3]`
 
-### Editor API Calls
-Built-in functions are highlighted specially:
-```javascript
-getCurrentLine();
-getLineText(line);
-setLineText(line, text);
-insertText("hello");
-// ... and 30+ other editor APIs
+### Comments
+- C-style single-line: `// comment`
+- C-style multi-line: `/* comment */`
+- Lua-style: `-- comment`
+
+### Built-in Functions (v0.1.0)
+All built-in functions are highlighted specially:
+
+**Array Functions:**
+```lua
+createArray(), arrayPush(), arrayPop(), arrayGet(),
+arraySet(), arrayLength(), tableInsert(), tableRemove(),
+tableConcat()
+```
+
+**Object/Table Functions:**
+```lua
+createObject(), objectSet(), objectGet(), objectKeys(),
+pairs(), ipairs()
+```
+
+**String Functions (NEW in v0.1.0):**
+```lua
+split(), join(), substring(), indexOf(), replace(),
+stringMatch(), stringFind(), stringGsub(), stringUpper(),
+stringLower(), stringFormat()
+```
+
+**Editor API Functions:**
+```lua
+getCurrentLine(), getLineText(), setLineText(),
+insertText(), getCursorPosition(), notify(),
+getSelectedText(), replaceSelection()
 ```
 
 ## Grove Integration Steps
@@ -65,9 +168,10 @@ pub const LanguageConfig = struct {
     // ... existing languages
     .ghostlang => .{
         .name = "Ghostlang",
-        .extensions = &.{".ghost", ".gza"},
+        .extensions = &.{".gza", ".ghost"},  // .gza is primary
         .tree_sitter = "ghostlang",
-        .comment_prefix = "//",
+        .comment_prefix_c = "//",      // C-style comments
+        .comment_prefix_lua = "--",    // Lua-style comments
         .parser_path = "vendor/grammars/ghostlang/src/parser.c",
         .abi_version = 15,  // Tree-sitter 25.0 ABI
     },
@@ -116,20 +220,36 @@ defer ts.ts_tree_delete(tree);
 
 The grammar defines these highlight groups that Grove themes can customize:
 
-- `@keyword` - Language keywords (`function`, `var`, `if`, etc.)
-- `@operator` - Operators (`+`, `==`, `=`, etc.)
-- `@function` - Function names
+### Keywords
+- `@keyword` - Control flow and declarations: `function`, `var`, `local`, `if`, `then`, `elseif`, `else`, `while`, `do`, `end`, `for`, `in`, `repeat`, `until`, `return`, `break`, `continue`
+- `@keyword.operator` - Lua logical operators: `and`, `or`, `not`
+
+### Operators
+- `@operator` - All operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `~=`, `<`, `>`, `<=`, `>=`, `&&`, `||`, `!`, `..`, `=`, `+=`, `-=`, `*=`, `/=`
+
+### Functions
+- `@function` - Function names in declarations
 - `@function.call` - Function calls
-- `@function.builtin` - Built-in editor API functions
+- `@function.builtin` - Built-in functions (arrays, objects, strings, editor APIs)
+
+### Variables & Scope
 - `@variable` - Variable names
 - `@property` - Object properties
 - `@parameter` - Function parameters
+
+### Literals
 - `@string` - String literals
+- `@string.escape` - Escape sequences
 - `@number` - Numeric literals
-- `@boolean` - Boolean literals
-- `@comment` - Comments
+- `@boolean` - Boolean literals (`true`, `false`)
+- `@constant.builtin` - Built-in constants (`null`)
+
+### Comments
+- `@comment` - All comment styles (C-style `//`, `/* */` and Lua-style `--`)
+
+### Punctuation
 - `@punctuation.bracket` - Brackets `()[]{}`
-- `@punctuation.delimiter` - Punctuation `;,.`
+- `@punctuation.delimiter` - Punctuation `;,.:`
 
 ## Text Objects
 
@@ -209,13 +329,22 @@ This makes Grove responsive even with large Ghostlang plugin files.
 
 ## Integration Status
 
-✅ **Grammar Complete** - All Ghostlang syntax supported
+✅ **Grammar Complete** - Full v0.1.0 dual syntax (Lua + C-style) support
 ✅ **Tree-sitter 25.0** - Upgraded to ABI 15 with tree-sitter.json
-✅ **Highlighting Queries** - Full syntax highlighting ready
-✅ **Text Objects** - Smart selection implemented
-✅ **Local Scopes** - Variable reference tracking
+✅ **Lua-style Syntax** - `if...then...end`, `while...do...end`, `for...do...end`, `repeat...until`
+✅ **C-style Syntax** - Braces `{}`, parentheses `()`, semicolons `;`
+✅ **Dual Operators** - Both `and`/`or`/`not` and `&&`/`||`/`!`
+✅ **Lua Comments** - Support for `--` single-line comments
+✅ **Local Variables** - `local` keyword for scoped variables/functions
+✅ **Multiple Returns** - `return a, b, c` syntax
+✅ **String Concatenation** - Lua `..` operator
+✅ **All v0.1.0 Built-ins** - Array, table, string, and editor functions
+✅ **Highlighting Queries** - Complete dual-syntax highlighting
+✅ **Text Objects** - Smart selection for both syntaxes
+✅ **Local Scopes** - Variable reference tracking with `local` support
 ✅ **Language Injections** - Embedded language support
-✅ **Test Coverage** - Comprehensive test suite passing
-🔄 **Grove Integration** - Ready for Grove with tree-sitter 25.0
+✅ **Test Coverage** - Comprehensive Lua-style test suite passing
+✅ **Primary Extension** - `.gza` prioritized over `.ghost`
+🔄 **Grove Integration** - Ready for Grove with full v0.1.0 support!
 
-The Ghostlang tree-sitter grammar is **production-ready** for Grove integration with tree-sitter 25.0!
+The Ghostlang v0.1.0 tree-sitter grammar is **production-ready** for Grove integration with complete dual-syntax support!

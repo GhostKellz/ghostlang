@@ -1,0 +1,399 @@
+================================================================================
+Lua-style if-then-else statement
+================================================================================
+
+if x > 5 then
+  print("big")
+else
+  print("small")
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (if_statement
+    condition: (relational_expression
+      (identifier)
+      (number_literal))
+    (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (string_literal))))))
+
+================================================================================
+Lua-style if-then-elseif statement
+================================================================================
+
+if x == 1 then
+  print("one")
+elseif x == 2 then
+  print("two")
+else
+  print("other")
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (if_statement
+    condition: (equality_expression
+      (identifier)
+      (number_literal))
+    (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (string_literal))))))
+
+================================================================================
+Lua-style while-do loop
+================================================================================
+
+while count < 10 do
+  count = count + 1
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (while_statement
+    condition: (relational_expression
+      (identifier)
+      (number_literal))
+    (expression_statement
+      (assignment_expression
+        left: (identifier)
+        operator: (string)
+        right: (additive_expression
+          (identifier)
+          (number_literal))))))
+
+================================================================================
+Lua-style numeric for loop
+================================================================================
+
+for i = 1, 10 do
+  print(i)
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (for_statement
+    variable: (identifier)
+    start: (number_literal)
+    end: (number_literal)
+    (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (identifier))))))
+
+================================================================================
+Lua-style numeric for loop with step
+================================================================================
+
+for i = 1, 10, 2 do
+  print(i)
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (for_statement
+    variable: (identifier)
+    start: (number_literal)
+    end: (number_literal)
+    step: (number_literal)
+    (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (identifier))))))
+
+================================================================================
+Lua-style generic for loop with pairs
+================================================================================
+
+for k, v in pairs(table) do
+  print(k, v)
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (for_statement
+    variables: (identifier)
+    iterator: (call_expression
+      function: (identifier)
+      arguments: (argument_list
+        (identifier)))
+    (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (identifier)
+          (identifier))))))
+
+================================================================================
+Lua-style generic for loop with ipairs
+================================================================================
+
+for idx, val in ipairs(array) do
+  print(idx, val)
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (for_statement
+    variables: (identifier)
+    iterator: (call_expression
+      function: (identifier)
+      arguments: (argument_list
+        (identifier)))
+    (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (identifier)
+          (identifier))))))
+
+================================================================================
+Repeat-until loop
+================================================================================
+
+repeat
+  x = x + 1
+until x >= 10
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (repeat_statement
+    (expression_statement
+      (assignment_expression
+        left: (identifier)
+        operator: (string)
+        right: (additive_expression
+          (identifier)
+          (number_literal))))
+    condition: (relational_expression
+      (identifier)
+      (number_literal))))
+
+================================================================================
+Local variable declaration
+================================================================================
+
+local x = 5
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (local_variable_declaration
+    name: (identifier)
+    value: (number_literal)))
+
+================================================================================
+Local function declaration
+================================================================================
+
+local function helper(x)
+  return x * 2
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (local_function_declaration
+    name: (identifier)
+    parameters: (parameter_list
+      (identifier))
+    body: (lua_block
+      (return_statement
+        (multiplicative_expression
+          (identifier)
+          (number_literal))))))
+
+================================================================================
+Lua-style function with end
+================================================================================
+
+function calculate(a, b)
+  local result = a + b
+  return result
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list
+      (identifier)
+      (identifier))
+    body: (lua_block
+      (local_variable_declaration
+        name: (identifier)
+        value: (additive_expression
+          (identifier)
+          (identifier)))
+      (return_statement
+        (identifier)))))
+
+================================================================================
+Lua-style logical operators (and/or/not)
+================================================================================
+
+if x > 5 and y < 10 then
+  print("yes")
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (if_statement
+    condition: (logical_and_expression
+      (relational_expression
+        (identifier)
+        (number_literal))
+      (relational_expression
+        (identifier)
+        (number_literal)))
+    (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (string_literal))))))
+
+================================================================================
+Lua-style not operator
+================================================================================
+
+if not ready then
+  print("wait")
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (if_statement
+    condition: (unary_expression
+      (identifier))
+    (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (string_literal))))))
+
+================================================================================
+Lua-style or operator
+================================================================================
+
+var result = x or y
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (logical_or_expression
+      (identifier)
+      (identifier))))
+
+================================================================================
+Lua-style inequality operator (~=)
+================================================================================
+
+if x ~= nil then
+  print("exists")
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (if_statement
+    condition: (equality_expression
+      (identifier)
+      (identifier))
+    (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (string_literal))))))
+
+================================================================================
+String concatenation operator (..)
+================================================================================
+
+var message = "Hello" .. " " .. "World"
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (concat_expression
+      (concat_expression
+        (string_literal)
+        (string_literal))
+      (string_literal))))
+
+================================================================================
+Multiple return values
+================================================================================
+
+function getCoords()
+  return 10, 20, 30
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (lua_block
+      (return_statement
+        (number_literal)
+        (number_literal)
+        (number_literal)))))
+
+================================================================================
+Break and continue statements
+================================================================================
+
+while true do
+  if x > 10 then
+    break
+  end
+  if x % 2 == 0 then
+    continue
+  end
+  print(x)
+end
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (while_statement
+    condition: (boolean_literal)
+    (if_statement
+      condition: (relational_expression
+        (identifier)
+        (number_literal))
+      (break_statement))
+    (if_statement
+      condition: (equality_expression
+        (multiplicative_expression
+          (identifier)
+          (number_literal))
+        (number_literal))
+      (continue_statement))
+    (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (identifier))))))

@@ -1,12 +1,15 @@
 {
   "name": "tree-sitter-ghostlang",
   "version": "0.1.0",
-  "description": "Tree-sitter grammar for Ghostlang scripting language",
+  "description": "Tree-sitter grammar for Ghostlang v0.1.0 - Dual Lua/C-style scripting language",
   "main": "bindings/node",
   "keywords": [
     "tree-sitter",
     "ghostlang",
+    "gza",
+    "lua",
     "grim",
+    "grove",
     "editor",
     "scripting",
     "parsing"

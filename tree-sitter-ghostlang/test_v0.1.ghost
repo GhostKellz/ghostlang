@@ -1,0 +1,127 @@
+-- Ghostlang v0.1.0 Test File
+-- Tests dual Lua-style and C-style syntax
+
+-- Lua-style if-then-end
+if x > 5 then
+  print("Lua style!")
+elseif x == 5 then
+  print("Equal")
+else
+  print("Less")
+end
+
+-- C-style if with braces
+if (y < 10) {
+  print("C style!");
+} else {
+  print("No");
+}
+
+-- Lua-style while loop
+local count = 0
+while count < 10 do
+  count = count + 1
+  print(count)
+end
+
+-- Lua-style numeric for
+for i = 1, 10, 2 do
+  print(i)
+end
+
+-- Lua-style generic for with pairs
+for k, v in pairs(table) do
+  print(k, v)
+end
+
+-- Lua-style generic for with ipairs
+for idx, val in ipairs(array) do
+  print(idx, val)
+end
+
+-- Repeat-until loop
+repeat
+  x = x + 1
+until x >= 100
+
+-- Local function
+local function helper(a, b)
+  return a + b
+end
+
+-- Function with end keyword
+function calculate(x, y)
+  local result = x * y
+  return result
+end
+
+-- Lua-style logical operators
+if x > 5 and y < 10 then
+  print("Both true")
+end
+
+if ready or done then
+  print("At least one")
+end
+
+if not finished then
+  print("Not finished")
+end
+
+-- Lua-style inequality
+if status ~= nil then
+  print("Has status")
+end
+
+-- String concatenation
+local message = "Hello" .. " " .. "World"
+print(message)
+
+-- Multiple return values
+function getPosition()
+  return 10, 20, 30
+end
+
+local x, y, z = getPosition()
+
+-- Break and continue
+while true do
+  if x > 100 then
+    break
+  end
+
+  if x % 2 == 0 then
+    continue
+  end
+
+  print(x)
+end
+
+-- New v0.1.0 built-in functions
+local parts = split("a,b,c", ",")
+local joined = join(parts, "|")
+local upper = stringUpper("hello")
+local lower = stringLower("WORLD")
+local formatted = stringFormat("Value: %d", 42)
+
+-- Array functions
+local arr = createArray()
+arrayPush(arr, 1)
+arrayPush(arr, 2)
+arrayPush(arr, 3)
+local last = arrayPop(arr)
+local len = arrayLength(arr)
+
+-- Table functions
+local result = tableConcat(arr, ", ")
+tableInsert(arr, 1, 999)
+tableRemove(arr, 1)
+
+-- Object/table with pairs
+local obj = createObject()
+objectSet(obj, "name", "Test")
+objectSet(obj, "value", 123)
+
+for key, value in pairs(obj) do
+  print(key .. ": " .. value)
+end
