@@ -224,6 +224,26 @@ const ScriptTable = struct {
         return table;
     }
 
+    pub fn cloneDeep(self: *ScriptTable) !*ScriptTable {
+        const clone = try ScriptTable.create(self.allocator);
+        errdefer clone.release();
+
+        var it = self.map.iterator();
+        while (it.next()) |entry| {
+            const key_copy = try self.allocator.dupe(u8, entry.key_ptr.*);
+            const value_copy = try copyScriptValue(self.allocator, entry.value_ptr.*);
+            clone.map.put(key_copy, value_copy) catch |err| {
+                var tmp = value_copy;
+                tmp.deinit(self.allocator);
+                self.allocator.free(key_copy);
+                if (err == error.OutOfMemory) return err;
+                return err;
+            };
+        }
+
+        return clone;
+    }
+
     pub fn retain(self: *ScriptTable) void {
         self.ref_count += 1;
     }
@@ -256,6 +276,24 @@ const ScriptArray = struct {
             .ref_count = 1,
         };
         return array;
+    }
+
+    pub fn cloneDeep(self: *ScriptArray) !*ScriptArray {
+        const clone = try ScriptArray.create(self.allocator);
+        errdefer clone.release();
+
+        var idx: usize = 0;
+        while (idx < self.items.items.len) : (idx += 1) {
+            const value_copy = try copyScriptValue(self.allocator, self.items.items[idx]);
+            clone.items.append(clone.allocator, value_copy) catch |err| {
+                var tmp = value_copy;
+                tmp.deinit(self.allocator);
+                if (err == error.OutOfMemory) return err;
+                return err;
+            };
+        }
+
+        return clone;
     }
 
     pub fn retain(self: *ScriptArray) void {
@@ -347,6 +385,13 @@ const ScriptIterator = struct {
     has_value: bool,
     result_arity: u16,
 
+    pub const Current = struct {
+        has_key: bool,
+        key: ScriptValue,
+        has_value: bool,
+        value: ScriptValue,
+    };
+
     pub fn createFromArray(allocator: std.mem.Allocator, array_ptr: *ScriptArray) !*ScriptIterator {
         const iterator = try allocator.create(ScriptIterator);
         iterator.* = .{
@@ -437,6 +482,20 @@ const ScriptIterator = struct {
         }
     }
 
+    pub fn takeCurrent(self: *ScriptIterator) Current {
+        const result: Current = .{
+            .has_key = self.has_key,
+            .key = self.current_key,
+            .has_value = self.has_value,
+            .value = self.current_value,
+        };
+        self.current_key = .{ .nil = {} };
+        self.current_value = .{ .nil = {} };
+        self.has_key = false;
+        self.has_value = false;
+        return result;
+    }
+
     pub fn next(self: *ScriptIterator) IteratorError!bool {
         self.clearCurrent();
         switch (self.kind) {
@@ -466,20 +525,25 @@ const ScriptIterator = struct {
                 const key_slice = table_state.keys.items[table_state.index];
                 table_state.index += 1;
 
-                const key_copy = self.allocator.dupe(u8, key_slice) catch {
-                    return IteratorError.OutOfMemory;
-                };
-                self.current_key = .{ .string = key_copy };
-                self.has_key = true;
-
-                if (table_state.table_ptr.map.get(key_slice)) |value| {
-                    self.current_value = try copyScriptValue(self.allocator, value);
-                    self.has_value = true;
-                    return true;
+                if (self.result_arity >= 1) {
+                    const key_copy = self.allocator.dupe(u8, key_slice) catch {
+                        return IteratorError.OutOfMemory;
+                    };
+                    self.current_key = .{ .string = key_copy };
+                    self.has_key = true;
                 }
 
-                self.clearCurrent();
-                return IteratorError.TypeError;
+                if (self.result_arity >= 2) {
+                    if (table_state.table_ptr.map.get(key_slice)) |value| {
+                        self.current_value = try copyScriptValue(self.allocator, value);
+                        self.has_value = true;
+                    } else {
+                        self.current_value = .{ .nil = {} };
+                        self.has_value = true;
+                    }
+                }
+
+                return true;
             },
         }
     }
@@ -1242,6 +1306,9 @@ pub const Opcode = enum(u8) {
     table_set_index,
     table_get_index,
     array_append,
+    iterator_init,
+    iterator_next,
+    iterator_unpack,
     add,
     sub,
     mul,
@@ -1720,13 +1787,14 @@ pub const VM = struct {
                     const key_const_idx = instr.operands[1];
                     const value_reg = instr.operands[2];
                     const table_idx = operandIndex(table_reg);
-                    const table_value = self.registers[table_idx];
-                    if (table_value != .table) return ExecutionError.TypeError;
+                    const table_value_ptr = &self.registers[table_idx];
+                    if (table_value_ptr.* != .table) return ExecutionError.TypeError;
+                    try self.ensureTableUnique(table_value_ptr);
                     const key_idx = operandIndex(key_const_idx);
                     const key_const = self.constants[key_idx];
                     if (key_const != .string) return ExecutionError.TypeError;
                     const value_idx = operandIndex(value_reg);
-                    try self.tableSetField(table_value.table, key_const.string, self.registers[value_idx]);
+                    try self.tableSetField(table_value_ptr.*.table, key_const.string, self.registers[value_idx]);
                 },
                 .table_get_field => {
                     const dest_reg = instr.operands[0];
@@ -1752,7 +1820,7 @@ pub const VM = struct {
                     const index_idx = operandIndex(index_reg);
                     const value_idx = operandIndex(value_reg);
                     try self.setIndexedValue(
-                        self.registers[table_idx],
+                        &self.registers[table_idx],
                         self.registers[index_idx],
                         self.registers[value_idx],
                     );
@@ -1773,10 +1841,70 @@ pub const VM = struct {
                     const array_reg = instr.operands[0];
                     const value_reg = instr.operands[1];
                     const array_idx = operandIndex(array_reg);
-                    const array_value = self.registers[array_idx];
-                    if (array_value != .array) return ExecutionError.TypeError;
+                    const array_value_ptr = &self.registers[array_idx];
+                    if (array_value_ptr.* != .array) return ExecutionError.TypeError;
+                    try self.ensureArrayUnique(array_value_ptr);
                     const value_idx = operandIndex(value_reg);
-                    try self.arrayAppend(array_value.array, self.registers[value_idx]);
+                    try self.arrayAppend(array_value_ptr.*.array, self.registers[value_idx]);
+                },
+                .iterator_init => {
+                    const dest_reg = instr.operands[0];
+                    const source_reg = instr.operands[1];
+                    const var_count: u16 = instr.operands[2];
+                    const source_idx = operandIndex(source_reg);
+                    const value = self.registers[source_idx];
+                    const iterator_value = try self.coerceIteratorValue(value, var_count);
+                    self.setRegister(dest_reg, iterator_value);
+                },
+                .iterator_next => {
+                    const dest_reg = instr.operands[0];
+                    const iterator_reg = instr.operands[1];
+                    const iterator_idx = operandIndex(iterator_reg);
+                    const iterator_value = self.registers[iterator_idx];
+                    if (iterator_value != .iterator) return ExecutionError.TypeError;
+                    const advanced = iterator_value.iterator.next() catch |err| switch (err) {
+                        ScriptIterator.IteratorError.OutOfMemory => return ExecutionError.OutOfMemory,
+                        ScriptIterator.IteratorError.TypeError => return ExecutionError.TypeError,
+                    };
+                    self.setRegister(dest_reg, .{ .boolean = advanced });
+                },
+                .iterator_unpack => {
+                    const dest_start = instr.operands[0];
+                    const count_raw = instr.operands[1];
+                    const iterator_reg = instr.operands[2];
+                    const iterator_idx = operandIndex(iterator_reg);
+                    const iterator_value = self.registers[iterator_idx];
+                    if (iterator_value != .iterator) return ExecutionError.TypeError;
+
+                    const payload = iterator_value.iterator.takeCurrent();
+                    var has_key = payload.has_key;
+                    var key_value = payload.key;
+                    var has_value = payload.has_value;
+                    var value_value = payload.value;
+
+                    const count: usize = @intCast(count_raw);
+                    var idx: usize = 0;
+                    while (idx < count) : (idx += 1) {
+                        const reg = dest_start + @as(u16, @intCast(idx));
+                        var assigned = ScriptValue{ .nil = {} };
+                        if (has_key) {
+                            assigned = key_value;
+                            has_key = false;
+                            key_value = .{ .nil = {} };
+                        } else if (has_value) {
+                            assigned = value_value;
+                            has_value = false;
+                            value_value = .{ .nil = {} };
+                        }
+                        self.setRegister(reg, assigned);
+                    }
+
+                    if (has_key) {
+                        key_value.deinit(self.allocator);
+                    }
+                    if (has_value) {
+                        value_value.deinit(self.allocator);
+                    }
                 },
                 .add => {
                     const dest = instr.operands[0];
@@ -2253,6 +2381,60 @@ pub const VM = struct {
         };
     }
 
+    fn coerceIteratorValue(self: *VM, value: ScriptValue, var_count: u16) ExecutionError!ScriptValue {
+        return switch (value) {
+            .iterator => |iter| blk: {
+                iter.configure(var_count);
+                iter.retain();
+                break :blk ScriptValue{ .iterator = iter };
+            },
+            .array => |array_ptr| blk: {
+                const iterator = ScriptIterator.createFromArray(self.allocator, array_ptr) catch |err| switch (err) {
+                    error.OutOfMemory => return ExecutionError.OutOfMemory,
+                };
+                iterator.configure(var_count);
+                break :blk ScriptValue{ .iterator = iterator };
+            },
+            .table => |table_ptr| blk: {
+                const iterator = ScriptIterator.createFromTable(self.allocator, table_ptr) catch |err| switch (err) {
+                    ScriptIterator.IteratorError.OutOfMemory => return ExecutionError.OutOfMemory,
+                    ScriptIterator.IteratorError.TypeError => return ExecutionError.TypeError,
+                };
+                iterator.configure(var_count);
+                break :blk ScriptValue{ .iterator = iterator };
+            },
+            else => return ExecutionError.TypeError,
+        };
+    }
+
+    fn ensureTableUnique(self: *VM, value: *ScriptValue) ExecutionError!void {
+        _ = self;
+        if (value.* != .table) return;
+        const table_ptr = value.table;
+        if (table_ptr.ref_count <= 1) return;
+
+        const clone = table_ptr.cloneDeep() catch |err| switch (err) {
+            error.OutOfMemory => return ExecutionError.OutOfMemory,
+            else => return err,
+        };
+        table_ptr.release();
+        value.* = .{ .table = clone };
+    }
+
+    fn ensureArrayUnique(self: *VM, value: *ScriptValue) ExecutionError!void {
+        _ = self;
+        if (value.* != .array) return;
+        const array_ptr = value.array;
+        if (array_ptr.ref_count <= 1) return;
+
+        const clone = array_ptr.cloneDeep() catch |err| switch (err) {
+            error.OutOfMemory => return ExecutionError.OutOfMemory,
+            else => return err,
+        };
+        array_ptr.release();
+        value.* = .{ .array = clone };
+    }
+
     fn instantiateFunction(self: *VM, template: *ScriptFunction) !*ScriptFunction {
         const instance = try ScriptFunction.init(self.allocator, template.start_pc, template.end_pc, template.param_names, template.capture_names);
         errdefer instance.release();
@@ -2343,10 +2525,12 @@ pub const VM = struct {
         };
     }
 
-    fn setIndexedValue(self: *VM, container: ScriptValue, index: ScriptValue, value: ScriptValue) ExecutionError!void {
-        switch (container) {
-            .array => |array_ptr| {
+    fn setIndexedValue(self: *VM, container: *ScriptValue, index: ScriptValue, value: ScriptValue) ExecutionError!void {
+        switch (container.*) {
+            .array => {
                 if (index != .number) return ExecutionError.TypeError;
+                try self.ensureArrayUnique(container);
+                const array_ptr = container.*.array;
                 const idx = try arrayIndexFromNumber(index.number);
                 if (idx >= array_ptr.items.items.len) {
                     return ExecutionError.TypeError;
@@ -2355,8 +2539,10 @@ pub const VM = struct {
                 array_ptr.items.items[idx].deinit(self.allocator);
                 array_ptr.items.items[idx] = value_copy;
             },
-            .table => |table_ptr| {
+            .table => {
                 if (index != .string) return ExecutionError.TypeError;
+                try self.ensureTableUnique(container);
+                const table_ptr = container.*.table;
                 try self.tableSetField(table_ptr, index.string, value);
             },
             else => return ExecutionError.TypeError,
@@ -2601,46 +2787,22 @@ pub const BuiltinFunctions = struct {
         if (args.len != 1 or args[0] != .table) return .{ .nil = {} };
         const table_ptr = args[0].table;
         const allocator = table_ptr.allocator;
-        const result = ScriptArray.create(allocator) catch {
+        const iterator = ScriptIterator.createFromTable(allocator, table_ptr) catch {
             return .{ .nil = {} };
         };
-        var it = table_ptr.map.iterator();
-        while (it.next()) |entry| {
-            const key_copy = allocator.dupe(u8, entry.key_ptr.*) catch {
-                result.release();
-                return .{ .nil = {} };
-            };
-            const value = ScriptValue{ .string = key_copy };
-            result.items.append(result.allocator, value) catch {
-                allocator.free(key_copy);
-                result.release();
-                return .{ .nil = {} };
-            };
-        }
-        return .{ .array = result };
+        iterator.configure(2);
+        return .{ .iterator = iterator };
     }
 
     pub fn builtin_ipairs(args: []const ScriptValue) ScriptValue {
         if (args.len != 1 or args[0] != .array) return .{ .nil = {} };
         const source = args[0].array;
         const allocator = source.allocator;
-        const result = ScriptArray.create(allocator) catch {
+        const iterator = ScriptIterator.createFromArray(allocator, source) catch {
             return .{ .nil = {} };
         };
-        var idx: usize = 0;
-        while (idx < source.items.items.len) : (idx += 1) {
-            const value_copy = copyScriptValue(allocator, source.items.items[idx]) catch {
-                result.release();
-                return .{ .nil = {} };
-            };
-            result.items.append(result.allocator, value_copy) catch {
-                var tmp = value_copy;
-                tmp.deinit(allocator);
-                result.release();
-                return .{ .nil = {} };
-            };
-        }
-        return .{ .array = result };
+        iterator.configure(2);
+        return .{ .iterator = iterator };
     }
 
     pub fn builtin_find(args: []const ScriptValue) ScriptValue {
@@ -3420,22 +3582,61 @@ pub const Parser = struct {
 
     fn parseForStatement(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction)) anyerror!u16 {
         self.skipWhitespace();
-        const iter_name = try self.parseIdent();
-        defer self.allocator.free(iter_name);
+    const first_name = try self.parseIdent();
 
         self.skipWhitespace();
         if (self.peek() == '=') {
+            defer self.allocator.free(first_name);
             self.advance();
             self.skipWhitespace();
-            return try self.parseNumericForLoop(constants, instructions, iter_name);
+            return try self.parseNumericForLoop(constants, instructions, first_name);
         }
 
-        if (self.matchKeyword("in")) {
+        var name_list = std.ArrayListUnmanaged([]const u8){};
+        defer {
+            var idx: usize = 0;
+            while (idx < name_list.items.len) : (idx += 1) {
+                self.allocator.free(name_list.items[idx]);
+            }
+            name_list.deinit(self.allocator);
+        }
+
+        name_list.append(self.allocator, first_name) catch |err| {
+            self.allocator.free(first_name);
+            return err;
+        };
+
+        while (true) {
             self.skipWhitespace();
-            return try self.parseRangeForLoop(constants, instructions, iter_name);
+            if (self.peek() == ',') {
+                self.advance();
+                self.skipWhitespace();
+                const extra_name = try self.parseIdent();
+                name_list.append(self.allocator, extra_name) catch |err| {
+                    self.allocator.free(extra_name);
+                    return err;
+                };
+                continue;
+            }
+            break;
         }
 
-        return error.ParseError;
+        self.skipWhitespace();
+        if (!self.matchKeyword("in")) return error.ParseError;
+        self.skipWhitespace();
+
+        const iterable_expr = try self.parseExpression(constants, instructions, 0);
+        self.skipWhitespace();
+
+        if (self.matchOperator("..")) {
+            if (name_list.items.len != 1) return error.ParseError;
+            self.skipWhitespace();
+            const end_expr = try self.parseExpression(constants, instructions, iterable_expr.next_reg);
+            self.skipWhitespace();
+            return try self.parseRangeForLoop(constants, instructions, name_list.items[0], iterable_expr, end_expr);
+        }
+
+        return try self.parseGenericForLoop(constants, instructions, name_list.items, iterable_expr);
     }
 
     fn parseNumericForLoop(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction), iter_name: []const u8) anyerror!u16 {
@@ -3562,13 +3763,14 @@ pub const Parser = struct {
         return body_result;
     }
 
-    fn parseRangeForLoop(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction), iter_name: []const u8) anyerror!u16 {
-        const start_expr = try self.parseExpression(constants, instructions, 0);
-        self.skipWhitespace();
-        if (!self.matchOperator("..")) return error.ParseError;
-        self.skipWhitespace();
-        const end_expr = try self.parseExpression(constants, instructions, start_expr.next_reg);
-        self.skipWhitespace();
+    fn parseRangeForLoop(
+        self: *Parser,
+        constants: *std.ArrayListUnmanaged(ScriptValue),
+        instructions: *std.ArrayListUnmanaged(Instruction),
+        iter_name: []const u8,
+        start_expr: ParseResult,
+        end_expr: ParseResult,
+    ) anyerror!u16 {
 
         const iter_name_idx = @as(u16, @intCast(constants.items.len));
         try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, iter_name) });
@@ -3628,6 +3830,96 @@ pub const Parser = struct {
         try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ end_reg, one_const_idx, 0 } });
         try instructions.append(self.allocator, .{ .opcode = .add, .operands = [_]u16{ iter_reg, iter_reg, end_reg } });
         try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ iter_reg, iter_name_idx, 0 } });
+
+        try instructions.append(self.allocator, .{ .opcode = .jump, .operands = [_]u16{ @as(u16, @intCast(loop_start_idx)), 0, 0 } });
+        instructions.items[jump_exit_idx].operands[1] = @as(u16, @intCast(instructions.items.len));
+
+        try self.appendEndScope(instructions);
+        self.popLoop(instructions, instructions.items.len);
+
+        return body_result;
+    }
+
+    fn parseGenericForLoop(
+        self: *Parser,
+        constants: *std.ArrayListUnmanaged(ScriptValue),
+        instructions: *std.ArrayListUnmanaged(Instruction),
+        var_names: []const []const u8,
+        iter_expr: ParseResult,
+    ) anyerror!u16 {
+        if (var_names.len == 0) return error.ParseError;
+        if (var_names.len > 2) return error.ParseError;
+
+    const var_count_u16: u16 = @intCast(var_names.len);
+    const iterator_reg = iter_expr.result_reg;
+    const cond_reg = iter_expr.next_reg;
+    const unpack_base: u16 = cond_reg + 1;
+
+        const loop_setup_idx = instructions.items.len;
+        var loop_ctx = try self.pushLoop(loop_setup_idx, loop_setup_idx, cond_reg);
+
+        try self.appendBeginScope(instructions);
+        loop_ctx.loop_scope_base = self.scope_depth;
+        loop_ctx.result_reg = cond_reg;
+
+        var name_indices = std.ArrayListUnmanaged(u16){};
+        defer name_indices.deinit(self.allocator);
+
+        var idx: usize = 0;
+        while (idx < var_names.len) : (idx += 1) {
+            const name = var_names[idx];
+            try self.registerLocalCopy(name);
+            const name_idx = @as(u16, @intCast(constants.items.len));
+            try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, name) });
+            try name_indices.append(self.allocator, name_idx);
+        }
+
+        const iter_holder_name = try self.nextTempName("__iter");
+        defer self.allocator.free(iter_holder_name);
+        const iter_holder_idx = @as(u16, @intCast(constants.items.len));
+        try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, iter_holder_name) });
+        try self.registerLocalCopy(iter_holder_name);
+
+        try instructions.append(self.allocator, .{ .opcode = .iterator_init, .operands = [_]u16{ iterator_reg, iterator_reg, var_count_u16 } });
+        try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ iterator_reg, iter_holder_idx, 1 } });
+
+        const nil_const_idx: u16 = 0;
+        try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ cond_reg, nil_const_idx, 0 } });
+        var name_idx_iter: usize = 0;
+        while (name_idx_iter < name_indices.items.len) : (name_idx_iter += 1) {
+            const name_const = name_indices.items[name_idx_iter];
+            try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ cond_reg, name_const, 1 } });
+        }
+
+        const loop_start_idx = instructions.items.len;
+        loop_ctx.start_idx = loop_start_idx;
+        loop_ctx.continue_target = loop_start_idx;
+
+        try instructions.append(self.allocator, .{ .opcode = .load_global, .operands = [_]u16{ iterator_reg, iter_holder_idx, 0 } });
+        try instructions.append(self.allocator, .{ .opcode = .iterator_next, .operands = [_]u16{ cond_reg, iterator_reg, 0 } });
+        const jump_exit_idx = instructions.items.len;
+        try instructions.append(self.allocator, .{ .opcode = .jump_if_false, .operands = [_]u16{ cond_reg, 0, 0 } });
+
+        try instructions.append(self.allocator, .{ .opcode = .iterator_unpack, .operands = [_]u16{ unpack_base, var_count_u16, iterator_reg } });
+        idx = 0;
+        while (idx < var_names.len) : (idx += 1) {
+            const source_reg = unpack_base + @as(u16, @intCast(idx));
+            const name_const = name_indices.items[idx];
+            try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ source_reg, name_const, 0 } });
+        }
+
+        self.skipWhitespace();
+        var body_result: u16 = 0;
+        if (self.peek() == '{') {
+            body_result = try self.parseBlock(constants, instructions);
+        } else {
+            if (!self.matchKeyword("do")) return error.ParseError;
+            self.skipWhitespace();
+            body_result = try self.parseLuaScopedBlock(constants, instructions, &.{"end"});
+            self.skipWhitespace();
+            if (!self.matchKeyword("end")) return error.ParseError;
+        }
+        self.skipWhitespace();
 
         try instructions.append(self.allocator, .{ .opcode = .jump, .operands = [_]u16{ @as(u16, @intCast(loop_start_idx)), 0, 0 } });
         instructions.items[jump_exit_idx].operands[1] = @as(u16, @intCast(instructions.items.len));
@@ -5065,6 +5357,102 @@ test "square bracket literal creates array" {
     try std.testing.expectEqual(@as(f64, 7), result.number);
 }
 
+test "generic array loop sums values" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\var data = [1, 2, 3, 4]
+        \\var total = 0
+        \\for value in data {
+        \\    total = total + value
+        \\}
+        \\total
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 10), result.number);
+}
+
+test "generic array loop yields index values" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\var data = [5, 10, 15]
+        \\var total = 0
+        \\for index, value in data {
+        \\    total = total + index * value
+        \\}
+        \\total
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 70), result.number);
+}
+
+test "generic table loop collects entries" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\var mapping = { alpha = 4, beta = 6, gamma = 8 }
+        \\var count = 0
+        \\for key in mapping {
+        \\    count = count + 1
+        \\}
+        \\var total = 0
+        \\for key, value in mapping {
+        \\    total = total + value
+        \\}
+        \\if count == 3 then total else 0 end
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 18), result.number);
+}
+
+test "ipairs builtin iterates array" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\var numbers = [2, 4, 6]
+        \\var total = 0
+        \\for index, value in ipairs(numbers) {
+        \\    total = total + index + value
+        \\}
+        \\total
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 18), result.number);
+}
+
 test "empty brace literal creates table" {
     const allocator = std.testing.allocator;
     const config = EngineConfig{ .allocator = allocator };
@@ -5085,7 +5473,7 @@ test "empty brace literal creates table" {
     try std.testing.expectEqual(@as(f64, 42), result.number);
 }
 
-test "pairs builtin returns key count" {
+test "pairs builtin supports iterator loops" {
     const allocator = std.testing.allocator;
     const config = EngineConfig{ .allocator = allocator };
     var engine = try ScriptEngine.create(config);
@@ -5093,8 +5481,11 @@ test "pairs builtin returns key count" {
 
     const source =
         \\var mapping = { first = 1, second = 2, third = 3 }
-        \\var keys = pairs(mapping)
-        \\len(keys)
+        \\var total = 0
+        \\for key, value in pairs(mapping) {
+        \\    total = total + value
+        \\}
+        \\total
     ;
 
     var script = try engine.loadScript(source);
@@ -5102,7 +5493,7 @@ test "pairs builtin returns key count" {
 
     const result = try script.run();
     try std.testing.expect(result == .number);
-    try std.testing.expectEqual(@as(f64, 3), result.number);
+    try std.testing.expectEqual(@as(f64, 6), result.number);
 }
 
 test "string find and match builtins" {
