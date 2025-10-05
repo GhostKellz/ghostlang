@@ -168,6 +168,28 @@ var pos = indexOf("hello", "ll");
 var replaced = replace("hello", "ll", "**");
 ```
 
+#### Helper Reference
+
+| Function | Arguments | Returns | Behavior |
+| --- | --- | --- | --- |
+| `createArray()` | – | `array` | Allocates a fresh `ScriptArray` owned by the current engine. |
+| `arrayPush(array, value)` | `array`, any | `array` | Adds a copy of `value` to the end of `array`, retaining the array for chaining. Returns `nil` if the first argument is not an array. |
+| `arraySet(array, index, value)` | `array`, `number`, any | `array` | Replaces the element at a zero-based integer `index`, or appends when the index equals the current length. Returns `nil` for sparse or invalid indexes. |
+| `arrayPop(array)` | `array` | value or `nil` | Removes and returns the final element. Returns `nil` when the array is empty or the argument isn’t an array. |
+| `arrayLength(array)` | `array` | `number` | Returns the number of elements in the array. |
+| `arrayGet(array, index)` | `array`, `number` | value or `nil` | Retrieves a cloned copy of the element at a zero-based integer `index`. Returns `nil` for non-integer indexes or out-of-range access. |
+| `createObject()` | – | `table` | Allocates a fresh `ScriptTable` owned by the current engine. |
+| `objectSet(object, key, value)` | `table`, `string`, any | `table` | Inserts or replaces a property on `object`. Keys are copied; values are deep-cloned. Returns `nil` for invalid inputs. |
+| `objectGet(object, key)` | `table`, `string` | value or `nil` | Returns a cloned copy of the property value or `nil` when missing. |
+| `objectKeys(object)` | `table` | `array` | Returns a string array containing shallow copies of the table’s keys. Order matches the underlying hash iteration and is not guaranteed to be stable. |
+| `split(text, delimiter)` | `string`, `string` | `array` | Splits `text` into a string array. An empty delimiter produces an array of single-character strings. |
+| `join(array, delimiter)` | `array`, `string` | `string` | Concatenates string elements of `array` using `delimiter`. Returns `nil` if any element is not a string. |
+| `substring(text, start, [end])` | `string`, `number`, optional `number` | `string` | Returns the slice from zero-based `start` up to (exclusive) `end`. Negative or non-integer indexes yield `nil`. Omitted `end` reads to the end of the string. |
+| `indexOf(text, search)` | `string`, `string` | `number` | Returns the zero-based index of the first occurrence of `search`, or `-1` when not found. Empty `search` yields `0`. |
+| `replace(text, search, replacement)` | `string`, `string`, `string` | `string` | Replaces the first occurrence of `search` in `text`. If `search` is empty or not present, the original text is returned. |
+
+> **Safety notes:** Helper functions operate on deep copies tied to the engine’s helper allocator. Invalid argument types short-circuit with `nil` (or `-1` for `indexOf`) rather than raising runtime errors, keeping plugins resilient.
+
 ### Buffer Operations
 
 ```javascript

@@ -630,6 +630,8 @@ fn copyScriptValue(allocator: std.mem.Allocator, value: ScriptValue) !ScriptValu
     };
 }
 
+var editor_helper_allocator: ?std.mem.Allocator = null;
+
 fn arrayIndexFromNumber(number: f64) ExecutionError!usize {
     if (number < 1) return ExecutionError.TypeError;
     const floored = std.math.floor(number);
@@ -867,6 +869,12 @@ pub const ScriptEngine = struct {
 
         // Free the heap-allocated memory limiter
         if (self.memory_limiter) |limiter| {
+            if (editor_helper_allocator) |alloc| {
+                const limiter_ptr: *anyopaque = @ptrCast(limiter);
+                if (alloc.ptr == limiter_ptr) {
+                    editor_helper_allocator = null;
+                }
+            }
             self.config.allocator.destroy(limiter);
         }
     }
@@ -1179,13 +1187,17 @@ pub const ScriptEngine = struct {
 
     // Editor helper functions for working with complex data types
     pub fn registerEditorHelpers(self: *ScriptEngine) ExecutionError!void {
+        editor_helper_allocator = self.tracked_allocator;
         try self.registerFunction("createArray", createArrayFunction);
-        try self.registerFunction("arrayPush", arrayPushFunction);
-        try self.registerFunction("arrayLength", arrayLengthFunction);
-        try self.registerFunction("arrayGet", arrayGetFunction);
+    try self.registerFunction("arrayPush", arrayPushFunction);
+    try self.registerFunction("arraySet", arraySetFunction);
+    try self.registerFunction("arrayPop", arrayPopFunction);
+    try self.registerFunction("arrayLength", arrayLengthFunction);
+    try self.registerFunction("arrayGet", arrayGetFunction);
         try self.registerFunction("createObject", createObjectFunction);
         try self.registerFunction("objectSet", objectSetFunction);
         try self.registerFunction("objectGet", objectGetFunction);
+    try self.registerFunction("objectKeys", objectKeysFunction);
         try self.registerFunction("split", splitFunction);
         try self.registerFunction("join", joinFunction);
         try self.registerFunction("substring", substringFunction);
@@ -1221,75 +1233,365 @@ pub const ScriptEngine = struct {
     // Editor helper function implementations
     fn createArrayFunction(args: []const ScriptValue) ScriptValue {
         _ = args;
-        // In real implementation, would create a new array and return it
-        // For now, return a number representing array ID
-        return .{ .number = 0 };
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const array_ptr = ScriptArray.create(allocator) catch {
+            return .{ .nil = {} };
+        };
+        return .{ .array = array_ptr };
     }
 
     fn arrayPushFunction(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // Would add element to array
-        return .{ .nil = {} };
+        if (args.len != 2) return .{ .nil = {} };
+        if (args[0] != .array) return .{ .nil = {} };
+        const array_ptr = args[0].array;
+        const allocator = array_ptr.allocator;
+        const value_copy = copyScriptValue(allocator, args[1]) catch {
+            return .{ .nil = {} };
+        };
+        array_ptr.items.append(allocator, value_copy) catch {
+            var tmp = value_copy;
+            tmp.deinit(allocator);
+            return .{ .nil = {} };
+        };
+        array_ptr.retain();
+        return .{ .array = array_ptr };
+    }
+
+    fn arraySetFunction(args: []const ScriptValue) ScriptValue {
+        if (args.len != 3) return .{ .nil = {} };
+        if (args[0] != .array or args[1] != .number) return .{ .nil = {} };
+
+        const array_ptr = args[0].array;
+        const allocator = array_ptr.allocator;
+        const idx = numberToIndex(args[1].number) orelse return .{ .nil = {} };
+        if (idx > array_ptr.items.items.len) return .{ .nil = {} };
+
+        const value_copy = copyScriptValue(allocator, args[2]) catch {
+            return .{ .nil = {} };
+        };
+
+        if (idx == array_ptr.items.items.len) {
+            array_ptr.items.append(allocator, value_copy) catch {
+                var tmp = value_copy;
+                tmp.deinit(allocator);
+                return .{ .nil = {} };
+            };
+        } else {
+            var slot = &array_ptr.items.items[idx];
+            slot.deinit(allocator);
+            slot.* = value_copy;
+        }
+
+        array_ptr.retain();
+        return .{ .array = array_ptr };
+    }
+
+    fn arrayPopFunction(args: []const ScriptValue) ScriptValue {
+        if (args.len != 1) return .{ .nil = {} };
+        if (args[0] != .array) return .{ .nil = {} };
+
+        const array_ptr = args[0].array;
+        if (array_ptr.items.items.len == 0) return .{ .nil = {} };
+
+        const value = array_ptr.items.pop() orelse return .{ .nil = {} };
+        return value;
     }
 
     fn arrayLengthFunction(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // Would return array length
-        return .{ .number = 0 };
+        if (args.len != 1 or args[0] != .array) return .{ .nil = {} };
+        const array_ptr = args[0].array;
+        return .{ .number = @floatFromInt(array_ptr.items.items.len) };
     }
 
     fn arrayGetFunction(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // Would return array element at index
-        return .{ .nil = {} };
+        if (args.len != 2) return .{ .nil = {} };
+        if (args[0] != .array or args[1] != .number) return .{ .nil = {} };
+
+        const array_ptr = args[0].array;
+        const idx = numberToIndex(args[1].number) orelse return .{ .nil = {} };
+        if (idx >= array_ptr.items.items.len) return .{ .nil = {} };
+
+        return copyScriptValue(array_ptr.allocator, array_ptr.items.items[idx]) catch {
+            return .{ .nil = {} };
+        };
     }
 
     fn createObjectFunction(args: []const ScriptValue) ScriptValue {
         _ = args;
-        // Would create new object/table
-        return .{ .number = 0 }; // Object ID
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const table_ptr = ScriptTable.create(allocator) catch {
+            return .{ .nil = {} };
+        };
+        return .{ .table = table_ptr };
     }
 
     fn objectSetFunction(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // Would set object property
-        return .{ .nil = {} };
+        if (args.len != 3) return .{ .nil = {} };
+        if (args[0] != .table or args[1] != .string) return .{ .nil = {} };
+
+        const table_ptr = args[0].table;
+        const key_slice = args[1].string;
+        const allocator = table_ptr.allocator;
+
+        const value_copy = copyScriptValue(allocator, args[2]) catch {
+            return .{ .nil = {} };
+        };
+
+        if (table_ptr.map.getEntry(key_slice)) |entry| {
+            entry.value_ptr.deinit(allocator);
+            entry.value_ptr.* = value_copy;
+            table_ptr.retain();
+            return .{ .table = table_ptr };
+        }
+
+        const key_copy = allocator.dupe(u8, key_slice) catch {
+            var tmp = value_copy;
+            tmp.deinit(allocator);
+            return .{ .nil = {} };
+        };
+
+        table_ptr.map.put(key_copy, value_copy) catch {
+            var tmp = value_copy;
+            tmp.deinit(allocator);
+            allocator.free(key_copy);
+            return .{ .nil = {} };
+        };
+
+        table_ptr.retain();
+        return .{ .table = table_ptr };
     }
 
     fn objectGetFunction(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // Would get object property
+        if (args.len != 2) return .{ .nil = {} };
+        if (args[0] != .table or args[1] != .string) return .{ .nil = {} };
+
+        const table_ptr = args[0].table;
+        const allocator = table_ptr.allocator;
+        const key_slice = args[1].string;
+
+        if (table_ptr.map.get(key_slice)) |value| {
+            return copyScriptValue(allocator, value) catch {
+                return .{ .nil = {} };
+            };
+        }
         return .{ .nil = {} };
     }
 
+    fn objectKeysFunction(args: []const ScriptValue) ScriptValue {
+        if (args.len != 1) return .{ .nil = {} };
+        if (args[0] != .table) return .{ .nil = {} };
+
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const array_ptr = ScriptArray.create(allocator) catch {
+            return .{ .nil = {} };
+        };
+
+        const table_ptr = args[0].table;
+        var it = table_ptr.map.iterator();
+        while (it.next()) |entry| {
+            const key_copy = allocator.dupe(u8, entry.key_ptr.*) catch {
+                array_ptr.release();
+                return .{ .nil = {} };
+            };
+            const value = ScriptValue{ .string = key_copy };
+            array_ptr.items.append(allocator, value) catch {
+                var tmp = value;
+                tmp.deinit(allocator);
+                array_ptr.release();
+                return .{ .nil = {} };
+            };
+        }
+
+        return .{ .array = array_ptr };
+    }
+
     fn splitFunction(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // Would split string into array
-        return .{ .number = 0 }; // Array ID
+        if (args.len != 2) return .{ .nil = {} };
+        if (args[0] != .string or args[1] != .string) return .{ .nil = {} };
+
+        const source = args[0].string;
+        const delimiter = args[1].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+
+        const array_ptr = ScriptArray.create(allocator) catch {
+            return .{ .nil = {} };
+        };
+
+        if (delimiter.len == 0) {
+            var idx: usize = 0;
+            while (idx < source.len) : (idx += 1) {
+                const dup = allocator.dupe(u8, source[idx .. idx + 1]) catch {
+                    array_ptr.release();
+                    return .{ .nil = {} };
+                };
+                const value = ScriptValue{ .string = dup };
+                array_ptr.items.append(allocator, value) catch {
+                    var tmp = value;
+                    tmp.deinit(allocator);
+                    array_ptr.release();
+                    return .{ .nil = {} };
+                };
+            }
+            return .{ .array = array_ptr };
+        }
+
+        var iterator = std.mem.splitSequence(u8, source, delimiter);
+        while (iterator.next()) |part| {
+            const dup = allocator.dupe(u8, part) catch {
+                array_ptr.release();
+                return .{ .nil = {} };
+            };
+            const value = ScriptValue{ .string = dup };
+            array_ptr.items.append(allocator, value) catch {
+                var tmp = value;
+                tmp.deinit(allocator);
+                array_ptr.release();
+                return .{ .nil = {} };
+            };
+        }
+
+        return .{ .array = array_ptr };
     }
 
     fn joinFunction(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // Would join array into string
-        return .{ .string = "" };
+        if (args.len != 2) return .{ .nil = {} };
+        if (args[0] != .array or args[1] != .string) return .{ .nil = {} };
+
+        const array_ptr = args[0].array;
+        const delimiter = args[1].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+
+        var total_len: usize = 0;
+        for (array_ptr.items.items, 0..) |value, idx| {
+            if (value != .string) {
+                return .{ .nil = {} };
+            }
+            total_len += value.string.len;
+            if (idx > 0) {
+                total_len += delimiter.len;
+            }
+        }
+
+        const owned = allocator.alloc(u8, total_len) catch {
+            return .{ .nil = {} };
+        };
+
+        var offset: usize = 0;
+        for (array_ptr.items.items, 0..) |value, idx| {
+            if (idx > 0 and delimiter.len > 0) {
+                std.mem.copyForwards(u8, owned[offset .. offset + delimiter.len], delimiter);
+                offset += delimiter.len;
+            }
+            if (value == .string and value.string.len > 0) {
+                const slice = value.string;
+                std.mem.copyForwards(u8, owned[offset .. offset + slice.len], slice);
+                offset += slice.len;
+            }
+        }
+
+        return .{ .string = owned };
     }
 
     fn substringFunction(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // Would extract substring
-        return .{ .string = "" };
+        if (args.len < 2 or args.len > 3) return .{ .nil = {} };
+        if (args[0] != .string or args[1] != .number) return .{ .nil = {} };
+
+        const source = args[0].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const start_idx = numberToIndex(args[1].number) orelse return .{ .nil = {} };
+        if (start_idx > source.len) {
+            const empty = allocator.dupe(u8, &[_]u8{}) catch {
+                return .{ .nil = {} };
+            };
+            return .{ .string = empty };
+        }
+
+        var end_idx = source.len;
+        if (args.len == 3) {
+            if (args[2] != .number) return .{ .nil = {} };
+            const converted = numberToIndex(args[2].number) orelse return .{ .nil = {} };
+            end_idx = @min(converted, source.len);
+            if (end_idx < start_idx) end_idx = start_idx;
+        }
+
+        const slice = source[start_idx..end_idx];
+        const dup = allocator.dupe(u8, slice) catch {
+            return .{ .nil = {} };
+        };
+        return .{ .string = dup };
     }
 
     fn indexOfFunction(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // Would find substring index
+        if (args.len != 2) return .{ .nil = {} };
+        if (args[0] != .string or args[1] != .string) return .{ .nil = {} };
+
+        const haystack = args[0].string;
+        const needle = args[1].string;
+        if (needle.len == 0) return .{ .number = 0 };
+
+        if (std.mem.indexOf(u8, haystack, needle)) |idx| {
+            return .{ .number = @floatFromInt(idx) };
+        }
+
         return .{ .number = -1 };
     }
 
     fn replaceFunction(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // Would replace substring
-        return .{ .string = "" };
+        if (args.len != 3) return .{ .nil = {} };
+        if (args[0] != .string or args[1] != .string or args[2] != .string) return .{ .nil = {} };
+
+        const source = args[0].string;
+        const needle = args[1].string;
+        const replacement = args[2].string;
+
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+
+        if (needle.len == 0) {
+            const dup = allocator.dupe(u8, source) catch {
+                return .{ .nil = {} };
+            };
+            return .{ .string = dup };
+        }
+
+        const idx_opt = std.mem.indexOf(u8, source, needle);
+        if (idx_opt == null) {
+            const dup = allocator.dupe(u8, source) catch {
+                return .{ .nil = {} };
+            };
+            return .{ .string = dup };
+        }
+
+        const idx = idx_opt.?;
+        const prefix_len = idx;
+        const suffix_start = idx + needle.len;
+        const suffix_len = source.len - suffix_start;
+        const total_len = prefix_len + replacement.len + suffix_len;
+
+        const owned = allocator.alloc(u8, total_len) catch {
+            return .{ .nil = {} };
+        };
+
+        if (prefix_len > 0) {
+            std.mem.copyForwards(u8, owned[0..prefix_len], source[0..prefix_len]);
+        }
+        if (replacement.len > 0) {
+            std.mem.copyForwards(u8, owned[prefix_len .. prefix_len + replacement.len], replacement);
+        }
+        if (suffix_len > 0) {
+            std.mem.copyForwards(u8, owned[prefix_len + replacement.len ..], source[suffix_start..]);
+        }
+
+        return .{ .string = owned };
+    }
+
+    fn numberToIndex(number: f64) ?usize {
+        if (!std.math.isFinite(number)) return null;
+        if (number < 0) return null;
+        const floored = std.math.floor(number);
+        if (floored != number) return null;
+        const signed = @as(isize, @intFromFloat(floored));
+        if (signed < 0) return null;
+        return std.math.cast(usize, signed);
     }
 };
 
@@ -1725,6 +2027,10 @@ pub const VM = struct {
     }
 
     pub fn run(self: *VM) ExecutionError!ScriptValue {
+        const previous_vm = active_vm;
+        active_vm = self;
+        defer active_vm = previous_vm;
+
         self.start_time = std.time.milliTimestamp();
         self.instruction_count = 0;
 
@@ -2688,6 +2994,18 @@ pub const VM = struct {
 // ============================================================================
 // Built-in Functions
 // ============================================================================
+
+threadlocal var active_vm: ?*VM = null;
+
+fn helperAllocator() ?std.mem.Allocator {
+    if (active_vm) |vm| {
+        return vm.allocator;
+    }
+    if (editor_helper_allocator) |allocator| {
+        return allocator;
+    }
+    return null;
+}
 
 pub const BuiltinFunctions = struct {
     // String functions
@@ -5046,6 +5364,8 @@ test "script evaluates chained addition" {
     const config = EngineConfig{ .allocator = allocator };
     var engine = try ScriptEngine.create(config);
     defer engine.deinit();
+    try engine.registerEditorHelpers();
+    try std.testing.expect(engine.globals.get("createArray") != null);
 
     var script = try engine.loadScript("1 + 2 + 3");
     defer script.deinit();
@@ -5060,6 +5380,8 @@ test "script supports variable assignment and reuse" {
     const config = EngineConfig{ .allocator = allocator };
     var engine = try ScriptEngine.create(config);
     defer engine.deinit();
+    try engine.registerEditorHelpers();
+    try std.testing.expect(engine.globals.get("objectSet") != null);
 
     var script = try engine.loadScript("var foo = 41; foo + 1");
     defer script.deinit();
@@ -5074,6 +5396,8 @@ test "script can call registered host function" {
     const config = EngineConfig{ .allocator = allocator };
     var engine = try ScriptEngine.create(config);
     defer engine.deinit();
+    try engine.registerEditorHelpers();
+    try std.testing.expect(engine.globals.get("split") != null);
 
     try engine.registerFunction("print", identityPrint);
 
@@ -5778,6 +6102,136 @@ test "string find and match builtins" {
     const result = try script.run();
     try std.testing.expect(result == .number);
     try std.testing.expectEqual(@as(f64, 6), result.number);
+}
+
+test "editor helper array operations" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+    try engine.registerEditorHelpers();
+
+    const source =
+        \\var arr = createArray()
+        \\arrayPush(arr, 12)
+        \\arrayPush(arr, 30)
+        \\var total = arrayGet(arr, 0) + arrayGet(arr, 1)
+        \\if arrayLength(arr) == 2 then total else 0 end
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 42), result.number);
+}
+
+test "editor helper object operations" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+    try engine.registerEditorHelpers();
+
+    const source =
+        \\var obj = createObject()
+        \\objectSet(obj, "name", "ghost")
+        \\objectSet(obj, "count", 3)
+        \\var name = objectGet(obj, "name")
+        \\var count = objectGet(obj, "count")
+        \\if name == "ghost" then count else 0 end
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 3), result.number);
+}
+
+test "editor helper string utilities" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+    try engine.registerEditorHelpers();
+
+    const source =
+        \\var parts = split("alpha beta gamma", " ")
+        \\var joined = join(parts, ",")
+        \\var segment = substring(joined, 6, 10)
+        \\var pos = indexOf(joined, "beta")
+        \\var replaced = replace(joined, "beta", "BETA")
+        \\if joined == "alpha,beta,gamma" and segment == "beta" and pos == 6 and replaced == "alpha,BETA,gamma" then 1 else 0 end
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 1), result.number);
+}
+
+test "editor helper array set and pop" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+    try engine.registerEditorHelpers();
+
+    const source =
+        \\var arr = createArray()
+        \\arrayPush(arr, "start")
+        \\arraySet(arr, 0, "first")
+        \\arraySet(arr, 1, "second")
+        \\var popped = arrayPop(arr)
+        \\var len = arrayLength(arr)
+        \\var remaining = arrayGet(arr, 0)
+        \\if popped == "second" and len == 1 and remaining == "first" then 1 else 0 end
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 1), result.number);
+}
+
+test "editor helper object keys enumeration" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+    try engine.registerEditorHelpers();
+
+    const source =
+        \\var obj = createObject()
+        \\objectSet(obj, "alpha", 1)
+        \\objectSet(obj, "beta", 2)
+        \\var keys = objectKeys(obj)
+        \\var len = arrayLength(keys)
+        \\var found = 0
+        \\var i = 0
+        \\while (i < len) {
+        \\    var key = arrayGet(keys, i)
+        \\    if (key == "alpha" or key == "beta") {
+        \\        found = found + 1
+        \\    }
+        \\    i = i + 1
+        \\}
+        \\if len == 2 and found == 2 then 1 else 0 end
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 1), result.number);
 }
 
 test "block scoped variable does not leak" {
