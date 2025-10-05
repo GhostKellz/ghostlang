@@ -1216,6 +1216,19 @@ pub const ScriptEngine = struct {
         try self.registerFunction("substring", substringFunction);
         try self.registerFunction("indexOf", indexOfFunction);
         try self.registerFunction("replace", replaceFunction);
+
+        // Lua-style string functions for GSH compatibility
+        try self.registerFunction("stringMatch", stringMatchFunction);
+        try self.registerFunction("stringFind", stringFindFunction);
+        try self.registerFunction("stringGsub", stringGsubFunction);
+        try self.registerFunction("stringUpper", stringUpperFunction);
+        try self.registerFunction("stringLower", stringLowerFunction);
+        try self.registerFunction("stringFormat", stringFormatFunction);
+
+        // Table helper functions for Lua compatibility
+        try self.registerFunction("tableInsert", tableInsertFunction);
+        try self.registerFunction("tableRemove", tableRemoveFunction);
+        try self.registerFunction("tableConcat", tableConcatFunction);
     }
 
     fn getTimeFunction(args: []const ScriptValue) ScriptValue {
@@ -1228,19 +1241,19 @@ pub const ScriptEngine = struct {
     fn writeFileFunction(args: []const ScriptValue) ScriptValue {
         _ = args;
         // This would be gated by IO permissions
-        return .{ .string = "IO not implemented in sandbox" };
+        return makeHelperStringLiteral("IO not implemented in sandbox");
     }
 
     fn readFileFunction(args: []const ScriptValue) ScriptValue {
         _ = args;
         // This would be gated by IO permissions
-        return .{ .string = "IO not implemented in sandbox" };
+        return makeHelperStringLiteral("IO not implemented in sandbox");
     }
 
     fn systemFunction(args: []const ScriptValue) ScriptValue {
         _ = args;
         // This would be gated by syscall permissions
-        return .{ .string = "Syscalls not allowed in sandbox" };
+        return makeHelperStringLiteral("Syscalls not allowed in sandbox");
     }
 
     // Editor helper function implementations
@@ -1594,6 +1607,286 @@ pub const ScriptEngine = struct {
             std.mem.copyForwards(u8, owned[prefix_len + replacement.len ..], source[suffix_start..]);
         }
 
+        return .{ .string = owned };
+    }
+
+    // Lua-style string functions for GSH compatibility
+    fn stringMatchFunction(args: []const ScriptValue) ScriptValue {
+        // stringMatch(str, pattern) - Simple pattern matching
+        // For now, implements basic substring search (full regex later)
+        if (args.len < 2) return .{ .nil = {} };
+        if (args[0] != .string or args[1] != .string) return .{ .nil = {} };
+
+        const source = args[0].string;
+        const pattern = args[1].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+
+        // Simple implementation: look for literal substring
+        // TODO: Implement full Lua pattern matching
+        if (std.mem.indexOf(u8, source, pattern)) |idx| {
+            // Return the matched substring
+            const matched = allocator.dupe(u8, source[idx .. idx + pattern.len]) catch {
+                return .{ .nil = {} };
+            };
+            return .{ .string = matched };
+        }
+
+        return .{ .nil = {} };
+    }
+
+    fn stringFindFunction(args: []const ScriptValue) ScriptValue {
+        // stringFind(str, pattern, [init]) - Find pattern in string
+        if (args.len < 2) return .{ .nil = {} };
+        if (args[0] != .string or args[1] != .string) return .{ .nil = {} };
+
+        const source = args[0].string;
+        const pattern = args[1].string;
+
+        var start_idx: usize = 0;
+        if (args.len >= 3 and args[2] == .number) {
+            start_idx = numberToIndex(args[2].number) orelse 0;
+            if (start_idx >= source.len) return .{ .nil = {} };
+        }
+
+        const search_slice = source[start_idx..];
+        if (std.mem.indexOf(u8, search_slice, pattern)) |idx| {
+            // Return 1-based index (Lua convention)
+            return .{ .number = @as(f64, @floatFromInt(start_idx + idx + 1)) };
+        }
+
+        return .{ .nil = {} };
+    }
+
+    fn stringGsubFunction(args: []const ScriptValue) ScriptValue {
+        // stringGsub(str, pattern, replacement) - Global substitution
+        if (args.len < 3) return .{ .nil = {} };
+        if (args[0] != .string or args[1] != .string or args[2] != .string) {
+            return .{ .nil = {} };
+        }
+
+        const source = args[0].string;
+        const pattern = args[1].string;
+        const replacement = args[2].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+
+        // Simple replace-all implementation
+        var result: std.ArrayList(u8) = .{};
+        defer result.deinit(allocator);
+
+        var pos: usize = 0;
+        while (pos < source.len) {
+            if (std.mem.indexOf(u8, source[pos..], pattern)) |idx| {
+                const abs_idx = pos + idx;
+                // Copy everything before match
+                result.appendSlice(allocator, source[pos..abs_idx]) catch return .{ .nil = {} };
+                // Add replacement
+                result.appendSlice(allocator, replacement) catch return .{ .nil = {} };
+                pos = abs_idx + pattern.len;
+            } else {
+                // Copy rest of string
+                result.appendSlice(allocator, source[pos..]) catch return .{ .nil = {} };
+                break;
+            }
+        }
+
+        const owned = result.toOwnedSlice(allocator) catch return .{ .nil = {} };
+        return .{ .string = owned };
+    }
+
+    fn stringUpperFunction(args: []const ScriptValue) ScriptValue {
+        if (args.len < 1) return .{ .nil = {} };
+        if (args[0] != .string) return .{ .nil = {} };
+
+        const source = args[0].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+
+        const result = allocator.alloc(u8, source.len) catch return .{ .nil = {} };
+        for (source, 0..) |c, i| {
+            result[i] = std.ascii.toUpper(c);
+        }
+
+        return .{ .string = result };
+    }
+
+    fn stringLowerFunction(args: []const ScriptValue) ScriptValue {
+        if (args.len < 1) return .{ .nil = {} };
+        if (args[0] != .string) return .{ .nil = {} };
+
+        const source = args[0].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+
+        const result = allocator.alloc(u8, source.len) catch return .{ .nil = {} };
+        for (source, 0..) |c, i| {
+            result[i] = std.ascii.toLower(c);
+        }
+
+        return .{ .string = result };
+    }
+
+    fn stringFormatFunction(args: []const ScriptValue) ScriptValue {
+        // stringFormat(fmt, ...) - Basic sprintf-style formatting
+        if (args.len < 1) return .{ .nil = {} };
+        if (args[0] != .string) return .{ .nil = {} };
+
+        const fmt = args[0].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+
+        // Simple implementation: replace %s and %d placeholders
+        var result: std.ArrayList(u8) = .{};
+        defer result.deinit(allocator);
+
+        var arg_idx: usize = 1;
+        var i: usize = 0;
+
+        while (i < fmt.len) {
+            if (fmt[i] == '%' and i + 1 < fmt.len) {
+                const spec = fmt[i + 1];
+                if (spec == 's' and arg_idx < args.len) {
+                    // String placeholder
+                    if (args[arg_idx] == .string) {
+                        result.appendSlice(allocator, args[arg_idx].string) catch return .{ .nil = {} };
+                    } else if (args[arg_idx] == .number) {
+                        var buf: [64]u8 = undefined;
+                        const str = std.fmt.bufPrint(&buf, "{d}", .{args[arg_idx].number}) catch "";
+                        result.appendSlice(allocator, str) catch return .{ .nil = {} };
+                    }
+                    arg_idx += 1;
+                    i += 2;
+                    continue;
+                } else if (spec == 'd' and arg_idx < args.len) {
+                    // Number placeholder
+                    if (args[arg_idx] == .number) {
+                        var buf: [64]u8 = undefined;
+                        const str = std.fmt.bufPrint(&buf, "{d:.0}", .{args[arg_idx].number}) catch "";
+                        result.appendSlice(allocator, str) catch return .{ .nil = {} };
+                    }
+                    arg_idx += 1;
+                    i += 2;
+                    continue;
+                } else if (spec == '%') {
+                    // Escaped %
+                    result.append(allocator, '%') catch return .{ .nil = {} };
+                    i += 2;
+                    continue;
+                }
+            }
+            result.append(allocator, fmt[i]) catch return .{ .nil = {} };
+            i += 1;
+        }
+
+        const owned = result.toOwnedSlice(allocator) catch return .{ .nil = {} };
+        return .{ .string = owned };
+    }
+
+    // Table helper functions for Lua compatibility
+    fn tableInsertFunction(args: []const ScriptValue) ScriptValue {
+        // tableInsert(array, [pos], value) - Insert into array
+        if (args.len < 2) return .{ .nil = {} };
+        if (args[0] != .array) return .{ .nil = {} };
+
+        const array_ptr = args[0].array;
+        const allocator = array_ptr.allocator;
+
+        if (args.len == 2) {
+            // Insert at end
+            const value_copy = copyScriptValue(allocator, args[1]) catch {
+                return .{ .nil = {} };
+            };
+            array_ptr.items.append(allocator, value_copy) catch {
+                var tmp = value_copy;
+                tmp.deinit(allocator);
+                return .{ .nil = {} };
+            };
+        } else if (args.len >= 3 and args[1] == .number) {
+            // Insert at position (1-based index)
+            const pos = numberToIndex(args[1].number - 1) orelse return .{ .nil = {} };
+            if (pos > array_ptr.items.items.len) return .{ .nil = {} };
+
+            const value_copy = copyScriptValue(allocator, args[2]) catch {
+                return .{ .nil = {} };
+            };
+            array_ptr.items.insert(allocator, pos, value_copy) catch {
+                var tmp = value_copy;
+                tmp.deinit(allocator);
+                return .{ .nil = {} };
+            };
+        }
+
+        array_ptr.retain();
+        return .{ .array = array_ptr };
+    }
+
+    fn tableRemoveFunction(args: []const ScriptValue) ScriptValue {
+        // tableRemove(array, [pos]) - Remove from array
+        if (args.len < 1) return .{ .nil = {} };
+        if (args[0] != .array) return .{ .nil = {} };
+
+        const array_ptr = args[0].array;
+        const allocator = array_ptr.allocator;
+
+        if (array_ptr.items.items.len == 0) return .{ .nil = {} };
+
+        var pos: usize = array_ptr.items.items.len - 1;
+        if (args.len >= 2 and args[1] == .number) {
+            // Remove at position (1-based index)
+            pos = numberToIndex(args[1].number - 1) orelse return .{ .nil = {} };
+            if (pos >= array_ptr.items.items.len) return .{ .nil = {} };
+        }
+
+        var removed = array_ptr.items.orderedRemove(pos);
+        defer removed.deinit(allocator);
+
+        return removed;
+    }
+
+    fn tableConcatFunction(args: []const ScriptValue) ScriptValue {
+        // tableConcat(array, [sep], [i], [j]) - Concatenate array elements
+        if (args.len < 1) return .{ .nil = {} };
+        if (args[0] != .array) return .{ .nil = {} };
+
+        const array_ptr = args[0].array;
+        const allocator = array_ptr.allocator;
+
+        const sep = if (args.len >= 2 and args[1] == .string) args[1].string else "";
+        const start_idx: usize = if (args.len >= 3 and args[2] == .number)
+            numberToIndex(args[2].number - 1) orelse 0
+        else
+            0;
+        const end_idx: usize = if (args.len >= 4 and args[3] == .number)
+            numberToIndex(args[3].number - 1) orelse array_ptr.items.items.len - 1
+        else
+            if (array_ptr.items.items.len > 0) array_ptr.items.items.len - 1 else 0;
+
+        if (start_idx >= array_ptr.items.items.len) {
+            return .{ .string = allocator.dupe(u8, "") catch return .{ .nil = {} } };
+        }
+
+        var result: std.ArrayList(u8) = .{};
+        defer result.deinit(allocator);
+
+        var i = start_idx;
+        while (i <= end_idx and i < array_ptr.items.items.len) : (i += 1) {
+            if (i > start_idx and sep.len > 0) {
+                result.appendSlice(allocator, sep) catch return .{ .nil = {} };
+            }
+
+            const item = array_ptr.items.items[i];
+            switch (item) {
+                .string => |s| result.appendSlice(allocator, s) catch return .{ .nil = {} },
+                .number => |n| {
+                    var buf: [64]u8 = undefined;
+                    const str = std.fmt.bufPrint(&buf, "{d}", .{n}) catch "";
+                    result.appendSlice(allocator, str) catch return .{ .nil = {} };
+                },
+                .boolean => |b| {
+                    const str = if (b) "true" else "false";
+                    result.appendSlice(allocator, str) catch return .{ .nil = {} };
+                },
+                else => {},
+            }
+        }
+
+        const owned = result.toOwnedSlice(allocator) catch return .{ .nil = {} };
         return .{ .string = owned };
     }
 
@@ -2577,7 +2870,12 @@ pub const VM = struct {
                 .call => {
                     const func_name_idx = instr.operands[0];
                     const arg_start = instr.operands[1];
-                    const arg_count = instr.operands[2];
+                    const raw_arg_count = instr.operands[2];
+                    const has_variadic_args = (raw_arg_count & 0x8000) != 0;
+                    var arg_count: u16 = raw_arg_count & 0x7FFF;
+                    if (has_variadic_args) {
+                        arg_count +%= self.last_result_count;
+                    }
                     const start_index = operandIndex(arg_start);
                     const arg_len: usize = @intCast(arg_count);
                     const func_name_index: usize = @intCast(func_name_idx);
@@ -2619,7 +2917,12 @@ pub const VM = struct {
                 .call_value => {
                     const func_reg = instr.operands[0];
                     const arg_start = instr.operands[1];
-                    const arg_count = instr.operands[2];
+                    const raw_arg_count = instr.operands[2];
+                    const has_variadic_args = (raw_arg_count & 0x8000) != 0;
+                    var arg_count: u16 = raw_arg_count & 0x7FFF;
+                    if (has_variadic_args) {
+                        arg_count +%= self.last_result_count;
+                    }
                     const start_index = operandIndex(arg_start);
                     const arg_len: usize = @intCast(arg_count);
                     const func_idx = operandIndex(func_reg);
@@ -2938,6 +3241,9 @@ pub const VM = struct {
         }
 
         self.setRegister(dest_reg, .{ .boolean = true });
+        const dest_range_start: u16 = dest_reg + 1;
+        const dest_range_end: u16 = dest_reg + @as(u16, @intCast(desired_count));
+
         var idx: usize = 1;
         while (idx < desired_count) : (idx += 1) {
             const src_offset = idx - 1;
@@ -2955,6 +3261,7 @@ pub const VM = struct {
         while (cleanup < actual_count) : (cleanup += 1) {
             const src_reg: u16 = source_base + @as(u16, @intCast(cleanup));
             const idx_reg = operandIndex(src_reg);
+            if (src_reg >= dest_range_start and src_reg < dest_range_end) continue;
             self.registers[idx_reg].deinit(self.allocator);
             self.registers[idx_reg] = .{ .nil = {} };
         }
@@ -2963,6 +3270,7 @@ pub const VM = struct {
         while (leftover <= context.arg_count) : (leftover += 1) {
             const reg = source_base + @as(u16, @intCast(leftover));
             const reg_idx = operandIndex(reg);
+            if (reg >= dest_range_start and reg < dest_range_end) continue;
             self.registers[reg_idx].deinit(self.allocator);
             self.registers[reg_idx] = .{ .nil = {} };
         }
@@ -2983,7 +3291,10 @@ pub const VM = struct {
             desired_count = available_registers;
         }
 
-        self.setRegister(dest_reg, .{ .boolean = false });
+    self.setRegister(dest_reg, .{ .boolean = false });
+
+    const dest_range_start: u16 = dest_reg;
+    const dest_range_end: u16 = dest_reg + @as(u16, @intCast(desired_count));
 
         var message_consumed = false;
         if (desired_count >= 2) {
@@ -3009,6 +3320,7 @@ pub const VM = struct {
         while (cleanup <= context.arg_count) : (cleanup += 1) {
             const reg = context.result_base + cleanup;
             const idx = operandIndex(reg);
+            if (reg >= dest_range_start and reg < dest_range_end) continue;
             self.registers[idx].deinit(self.allocator);
             self.registers[idx] = .{ .nil = {} };
         }
@@ -3141,30 +3453,14 @@ pub const VM = struct {
 
     fn ensureTableUnique(self: *VM, value: *ScriptValue) ExecutionError!void {
         _ = self;
-        if (value.* != .table) return;
-        const table_ptr = value.table;
-        if (table_ptr.ref_count <= 1) return;
-
-        const clone = table_ptr.cloneDeep() catch |err| switch (err) {
-            error.OutOfMemory => return ExecutionError.OutOfMemory,
-            else => return err,
-        };
-        table_ptr.release();
-        value.* = .{ .table = clone };
+        _ = value;
+        return;
     }
 
     fn ensureArrayUnique(self: *VM, value: *ScriptValue) ExecutionError!void {
         _ = self;
-        if (value.* != .array) return;
-        const array_ptr = value.array;
-        if (array_ptr.ref_count <= 1) return;
-
-        const clone = array_ptr.cloneDeep() catch |err| switch (err) {
-            error.OutOfMemory => return ExecutionError.OutOfMemory,
-            else => return err,
-        };
-        array_ptr.release();
-        value.* = .{ .array = clone };
+        _ = value;
+        return;
     }
 
     fn instantiateFunction(self: *VM, template: *ScriptFunction) !*ScriptFunction {
@@ -4071,6 +4367,14 @@ fn helperAllocator() ?std.mem.Allocator {
     return null;
 }
 
+fn makeHelperStringLiteral(literal: []const u8) ScriptValue {
+    const allocator = helperAllocator() orelse return .{ .nil = {} };
+    const dup = allocator.dupe(u8, literal) catch {
+        return .{ .nil = {} };
+    };
+    return .{ .string = dup };
+}
+
 pub const BuiltinFunctions = struct {
     // String functions
     pub fn builtin_len(args: []const ScriptValue) ScriptValue {
@@ -4150,8 +4454,7 @@ pub const BuiltinFunctions = struct {
             .iterator => "iterator",
             .upvalue => "upvalue",
         };
-        // TODO: Allocate string properly
-        return .{ .string = type_name };
+        return makeHelperStringLiteral(type_name);
     }
 
     pub fn builtin_push(args: []const ScriptValue) ScriptValue {
@@ -4687,7 +4990,7 @@ pub const EditorAPI = struct {
         // TODO: Get from actual editor context
         const line_num = @as(usize, @intFromFloat(args[0].number));
         _ = line_num;
-        return .{ .string = "sample line text" };
+        return makeHelperStringLiteral("sample line text");
     }
 
     pub fn builtin_setLineText(args: []const ScriptValue) ScriptValue {
@@ -5261,6 +5564,42 @@ pub const Parser = struct {
                     try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, ident) });
                     try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ expr.result_reg, name_idx, 0 } });
                     return expr.result_reg;
+                }
+                if (self.peek() == '.') {
+                    const member_start = self.pos;
+                    self.advance();
+                    self.skipWhitespace();
+                    if (self.peekIdent()) {
+                        const field_name = try self.parseIdent();
+                        defer self.allocator.free(field_name);
+                        self.skipWhitespace();
+                        if (self.peek() == '=' and self.peekNext() != '=') {
+                            try self.noteIdentifierUsage(ident);
+                            self.advance();
+                            self.skipWhitespace();
+
+                            const table_reg: u16 = 0;
+                            const table_name_idx = @as(u16, @intCast(constants.items.len));
+                            try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, ident) });
+                            try instructions.append(self.allocator, .{ .opcode = .load_global, .operands = [_]u16{ table_reg, table_name_idx, 0 } });
+
+                            const key_idx = @as(u16, @intCast(constants.items.len));
+                            try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, field_name) });
+
+                            const value_reg_start: u16 = table_reg + 1;
+                            var value_res = try self.parseExpression(constants, instructions, value_reg_start);
+                            if (value_res.call_instr_index != null) {
+                                self.configureCallResultCount(instructions, &value_res, 1);
+                            }
+                            if (value_res.result_reg != value_reg_start) {
+                                try instructions.append(self.allocator, .{ .opcode = .move, .operands = [_]u16{ value_reg_start, value_res.result_reg, 0 } });
+                            }
+
+                            try instructions.append(self.allocator, .{ .opcode = .table_set_field, .operands = [_]u16{ table_reg, key_idx, value_reg_start } });
+                            return value_reg_start;
+                        }
+                    }
+                    self.pos = member_start;
                 }
                 self.pos = ident_start;
             }
@@ -6493,20 +6832,24 @@ pub const Parser = struct {
 
         var args_start: u16 = base.next_reg;
         var next_reg: u16 = base.next_reg;
-        var arg_count: u16 = 0;
+        var base_arg_count: u16 = 0;
+        var has_variadic_arg = false;
 
         if (base.self_reg) |self_reg| {
             args_start = base.result_reg + 1;
             try instructions.append(self.allocator, .{ .opcode = .move, .operands = [_]u16{ args_start, self_reg, 0 } });
             next_reg = args_start + 1;
-            arg_count = 1;
+            base_arg_count = 1;
         }
+
+        var arg_results = std.ArrayListUnmanaged(ParseResult){};
+        defer arg_results.deinit(self.allocator);
 
         if (self.peek() != ')') {
             while (true) {
                 const arg = try self.parseExpression(constants, instructions, next_reg);
                 next_reg = arg.next_reg;
-                arg_count += 1;
+                try arg_results.append(self.allocator, arg);
                 self.skipWhitespace();
                 if (self.peek() == ',') {
                     self.advance();
@@ -6517,10 +6860,38 @@ pub const Parser = struct {
             }
         }
 
+        if (arg_results.items.len > 0) {
+            const last_index = arg_results.items.len - 1;
+            var idx: usize = 0;
+            while (idx < arg_results.items.len) : (idx += 1) {
+                const entry = &arg_results.items[idx];
+                const is_last = idx == last_index;
+                const has_call = entry.call_instr_index != null;
+                const is_variadic_entry = is_last and has_call;
+                if (has_call) {
+                    if (is_variadic_entry) {
+                        self.configureCallResultCount(instructions, entry, 0);
+                        has_variadic_arg = true;
+                    } else {
+                        self.configureCallResultCount(instructions, entry, 1);
+                    }
+                }
+
+                if (!is_variadic_entry) {
+                    base_arg_count +%= entry.value_count;
+                }
+            }
+        }
+
         try self.expect(')');
 
+        const arg_operand: u16 = if (has_variadic_arg)
+            (base_arg_count | 0x8000)
+        else
+            base_arg_count;
+
         const call_idx = instructions.items.len;
-        try instructions.append(self.allocator, .{ .opcode = .call_value, .operands = [_]u16{ base.result_reg, args_start, arg_count }, .extra = 1 });
+        try instructions.append(self.allocator, .{ .opcode = .call_value, .operands = [_]u16{ base.result_reg, args_start, arg_operand }, .extra = 1 });
 
         const ensured_next = if (next_reg <= base.result_reg) base.result_reg + 1 else next_reg;
 
@@ -7257,7 +7628,8 @@ test "script defines lua style function" {
     var script = try engine.loadScript(source);
     defer script.deinit();
 
-    const result = try script.run();
+    var result = try script.run();
+    defer result.deinit(engine.tracked_allocator);
     try std.testing.expect(result == .number);
     try std.testing.expectEqual(@as(f64, 8), result.number);
 }
@@ -7287,6 +7659,161 @@ test "script function locals and loops" {
     const result = try script.run();
     try std.testing.expect(result == .number);
     try std.testing.expectEqual(@as(f64, 6), result.number);
+}
+
+test "local function declaration" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\local function double(x)
+        \\    return x * 2
+        \\end
+        \\double(7)
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 14), result.number);
+}
+
+test "anonymous function expression returns value" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\var doubler = function (x)
+        \\    return x * 2
+        \\end
+        \\doubler(9)
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 18), result.number);
+}
+
+test "return inside nested block unwinds function" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\function firstPositive(values)
+        \\    for _, value in ipairs(values) {
+        \\        if value > 0 then
+        \\            return value
+        \\        end
+        \\    }
+        \\    return -1
+        \\end
+        \\firstPositive([-2, -1, 5, 7])
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 5), result.number);
+}
+
+test "vararg function collects arguments" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    try engine.registerFunction("nativeSum", sumNumbers);
+
+    const source =
+        \\function sumAll(...)
+        \\    return nativeSum(...)
+        \\end
+        \\sumAll(1, 2, 3, 4)
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 10), result.number);
+}
+
+test "closure captures outer variable" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\function makeCounter(start)
+        \\    local value = start
+        \\    return function ()
+        \\        value = value + 1
+        \\        return value
+        \\    end
+        \\end
+        \\var counter = makeCounter(10)
+        \\counter()
+        \\counter()
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 12), result.number);
+}
+
+test "pcall handles success and failure" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\function mightFail(flag)
+        \\    if flag then
+        \\        error("boom")
+        \\    end
+        \\    return 42
+        \\end
+        \\local ok, value = pcall(mightFail, false)
+        \\local ok2, err = pcall(mightFail, true)
+    \\var details = [ok, value, ok2, err, type(err)]
+    \\details
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    var result = try script.run();
+    defer result.deinit(engine.tracked_allocator);
+    try std.testing.expect(result == .array);
+    const items = result.array.items.items;
+    try std.testing.expectEqual(@as(usize, 5), items.len);
+    try std.testing.expect(items[0] == .boolean and items[0].boolean);
+    try std.testing.expect(items[1] == .number);
+    try std.testing.expectEqual(@as(f64, 42), items[1].number);
+    try std.testing.expect(items[2] == .boolean and !items[2].boolean);
+    try std.testing.expect(items[3] == .string);
+    try std.testing.expect(std.mem.eql(u8, items[3].string, "boom"));
+    try std.testing.expect(items[4] == .string);
+    try std.testing.expect(std.mem.eql(u8, items[4].string, "string"));
 }
 
 test "script return without expression yields nil" {
@@ -7557,6 +8084,40 @@ test "ipairs builtin iterates array" {
     try std.testing.expectEqual(@as(f64, 18), result.number);
 }
 
+test "colon call binds self and supports global fallback" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\var tracker = {
+        \\    value = 5
+        \\}
+        \\tracker.bump = function (self, amount)
+        \\    self.value = self.value + amount
+        \\    return self.value
+        \\end
+        \\function take(self, amount)
+        \\    return self.value + amount
+        \\end
+    \\var first = tracker:bump(3)
+    \\var second = tracker:take(2)
+    \\var result = 0
+    \\if first == 8 and second == 10 then
+    \\    result = first
+    \\end
+    \\result
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 8), result.number);
+}
+
 test "empty brace literal creates table" {
     const allocator = std.testing.allocator;
     const config = EngineConfig{ .allocator = allocator };
@@ -7618,6 +8179,31 @@ test "string find and match builtins" {
     const result = try script.run();
     try std.testing.expect(result == .number);
     try std.testing.expectEqual(@as(f64, 6), result.number);
+}
+
+test "lua style string helpers operate correctly" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\var original = "GhostLang"
+        \\var uppercased = upper(original)
+        \\var lowercased = lower(original)
+        \\var length = len(original)
+        \\var slice = sub(original, 1, 5)
+        \\var replaced = gsub("ghost ghost", "ghost", "spirit")
+    \\var formatted = format("%s %d %f", "value", 7, 3.25)
+    \\if uppercased == "GHOSTLANG" and lowercased == "ghostlang" and length == 9 and slice == "Ghost" and replaced == "spirit spirit" and formatted == "value 7 3.250000" then 1 else 0 end
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 1), result.number);
 }
 
 test "editor helper array operations" {

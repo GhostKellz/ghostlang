@@ -1,0 +1,157 @@
+-- GSH Feature Test Suite
+-- Tests all features needed for GShell plugins and configs
+
+print("=== GSH Feature Test Suite ===")
+
+-- Test 1: Variables and basic operations
+print("\n[1] Variables and operations:")
+var x = 10
+var y = 5
+var sum = x + y
+var diff = x - y
+var prod = x * y
+var quot = x / y
+var mod = x % y
+print("10 + 5 = " .. sum)
+print("10 % 5 = " .. mod)
+
+-- Test 2: String concatenation
+print("\n[2] String concatenation:")
+var user = "ghostkellz"
+var host = "linux"
+var msg = user .. "@" .. host
+print(msg)
+
+-- Test 3: If/then/else statements
+print("\n[3] If/then/else:")
+if x > y then
+    print("10 > 5: PASS")
+else
+    print("10 > 5: FAIL")
+end
+
+if x < y then
+    print("10 < 5: FAIL")
+else
+    print("10 < 5: PASS (else branch)")
+end
+
+-- Test 4: Logical operators
+print("\n[4] Logical operators:")
+if x > 0 and y > 0 then
+    print("Both positive: PASS")
+end
+
+if x < 0 or y > 0 then
+    print("At least one positive: PASS")
+end
+
+var flag = true
+if not flag then
+    print("not true: FAIL")
+else
+    print("not true = false: PASS")
+end
+
+-- Test 5: While loops
+print("\n[5] While loop:")
+var i = 1
+while i <= 3 do
+    print("Count: " .. i)
+    i = i + 1
+end
+
+-- Test 6: Numeric for loops
+print("\n[6] Numeric for loop:")
+for j = 1, 5 do
+    print("For loop: " .. j)
+end
+
+-- Test 7: For loop with step
+print("\n[7] For loop with step:")
+for k = 0, 10, 2 do
+    print("Step 2: " .. k)
+end
+
+-- Test 8: Functions
+print("\n[8] Functions:")
+function add(a, b)
+    return a + b
+end
+
+function greet(name)
+    return "Hello, " .. name
+end
+
+var result = add(3, 7)
+print("add(3, 7) = " .. result)
+var greeting = greet("GShell")
+print(greeting)
+
+-- Test 9: Function with early return
+print("\n[9] Early return:")
+function check_positive(n)
+    if n <= 0 then
+        return "negative or zero"
+    end
+    return "positive"
+end
+
+print("check_positive(5): " .. check_positive(5))
+print("check_positive(-3): " .. check_positive(-3))
+
+-- Test 10: Multiple return values
+print("\n[10] Multiple returns:")
+function get_stats()
+    return 42, "answer"
+end
+
+var num, str = get_stats()
+print("First: " .. num)
+print("Second: " .. str)
+
+-- Test 11: Arrays
+print("\n[11] Arrays:")
+var arr = createArray()
+arrayPush(arr, "git")
+arrayPush(arr, "docker")
+arrayPush(arr, "network")
+var len = arrayLength(arr)
+print("Array length: " .. len)
+var first = arrayGet(arr, 0)
+print("First item: " .. first)
+
+-- Test 12: Objects/Tables
+print("\n[12] Objects:")
+var config = createObject()
+objectSet(config, "prompt", "$ ")
+objectSet(config, "theme", "blue")
+var prompt_val = objectGet(config, "prompt")
+print("Config prompt: " .. prompt_val)
+
+-- Test 13: Generic for loops with ipairs
+print("\n[13] Generic for with ipairs:")
+for idx, plugin in ipairs(arr) do
+    print("Plugin " .. idx .. ": " .. plugin)
+end
+
+-- Test 14: Generic for with pairs
+print("\n[14] Generic for with pairs:")
+for key, value in pairs(config) do
+    print(key .. " = " .. value)
+end
+
+-- Test 15: Nested conditions (elseif)
+print("\n[15] Elseif chains:")
+var score = 85
+if score >= 90 then
+    print("Grade: A")
+elseif score >= 80 then
+    print("Grade: B")
+elseif score >= 70 then
+    print("Grade: C")
+else
+    print("Grade: F")
+end
+
+print("\n=== All GSH Tests Complete ===")

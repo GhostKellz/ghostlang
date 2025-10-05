@@ -40,6 +40,7 @@ pub fn main() !void {
         .number => |n| std.debug.print("{d}\n", .{n}),
         .string => |s| std.debug.print("{s}\n", .{s}),
         .function => std.debug.print("<function>\n", .{}),
+        .native_function => std.debug.print("<native_function>\n", .{}),
         .script_function => std.debug.print("<script_function>\n", .{}),
         .table => std.debug.print("<table>\n", .{}),
         .array => std.debug.print("<array>\n", .{}),
