@@ -1,5 +1,6 @@
 const std = @import("std");
 const build_options = @import("build_options");
+const lua_pattern = @import("pattern.zig");
 
 // By convention, root.zig is the root source file when making a library.
 
@@ -1612,85 +1613,85 @@ pub const ScriptEngine = struct {
 
     // Lua-style string functions for GSH compatibility
     fn stringMatchFunction(args: []const ScriptValue) ScriptValue {
-        // stringMatch(str, pattern) - Simple pattern matching
-        // For now, implements basic substring search (full regex later)
+        // stringMatch(str, pattern) - Full Lua pattern matching with captures
         if (args.len < 2) return .{ .nil = {} };
         if (args[0] != .string or args[1] != .string) return .{ .nil = {} };
 
         const source = args[0].string;
-        const pattern = args[1].string;
+        const pattern_str = args[1].string;
         const allocator = helperAllocator() orelse return .{ .nil = {} };
 
-        // Simple implementation: look for literal substring
-        // TODO: Implement full Lua pattern matching
-        if (std.mem.indexOf(u8, source, pattern)) |idx| {
-            // Return the matched substring
-            const matched = allocator.dupe(u8, source[idx .. idx + pattern.len]) catch {
+        // Use full Lua pattern matching
+        var result = lua_pattern.find(allocator, pattern_str, source, 0) catch {
+            return .{ .nil = {} };
+        } orelse return .{ .nil = {} };
+        defer result.deinit();
+
+        if (!result.matched) return .{ .nil = {} };
+
+        // If there are captures, return first capture
+        // If no captures, return whole match
+        if (result.captures.len > 0) {
+            const cap = result.captures[0];
+            const captured = allocator.dupe(u8, source[cap.start..cap.end]) catch {
+                return .{ .nil = {} };
+            };
+            return .{ .string = captured };
+        } else {
+            const matched = allocator.dupe(u8, source[result.start..result.end]) catch {
                 return .{ .nil = {} };
             };
             return .{ .string = matched };
         }
-
-        return .{ .nil = {} };
     }
 
     fn stringFindFunction(args: []const ScriptValue) ScriptValue {
-        // stringFind(str, pattern, [init]) - Find pattern in string
+        // stringFind(str, pattern, [init]) - Find pattern with full Lua matching
         if (args.len < 2) return .{ .nil = {} };
         if (args[0] != .string or args[1] != .string) return .{ .nil = {} };
 
         const source = args[0].string;
-        const pattern = args[1].string;
+        const pattern_str = args[1].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
 
         var start_idx: usize = 0;
         if (args.len >= 3 and args[2] == .number) {
-            start_idx = numberToIndex(args[2].number) orelse 0;
+            // Lua uses 1-based indexing
+            const lua_idx = args[2].number;
+            if (lua_idx < 1) return .{ .nil = {} };
+            start_idx = @intFromFloat(lua_idx - 1);
             if (start_idx >= source.len) return .{ .nil = {} };
         }
 
-        const search_slice = source[start_idx..];
-        if (std.mem.indexOf(u8, search_slice, pattern)) |idx| {
-            // Return 1-based index (Lua convention)
-            return .{ .number = @as(f64, @floatFromInt(start_idx + idx + 1)) };
-        }
+        var result = lua_pattern.find(allocator, pattern_str, source, start_idx) catch {
+            return .{ .nil = {} };
+        } orelse return .{ .nil = {} };
+        defer result.deinit();
 
-        return .{ .nil = {} };
+        if (!result.matched) return .{ .nil = {} };
+
+        // Return 1-based start position (Lua convention)
+        return .{ .number = @as(f64, @floatFromInt(result.start + 1)) };
     }
 
     fn stringGsubFunction(args: []const ScriptValue) ScriptValue {
-        // stringGsub(str, pattern, replacement) - Global substitution
+        // stringGsub(str, pattern, replacement) - Global substitution with captures
         if (args.len < 3) return .{ .nil = {} };
         if (args[0] != .string or args[1] != .string or args[2] != .string) {
             return .{ .nil = {} };
         }
 
         const source = args[0].string;
-        const pattern = args[1].string;
+        const pattern_str = args[1].string;
         const replacement = args[2].string;
         const allocator = helperAllocator() orelse return .{ .nil = {} };
 
-        // Simple replace-all implementation
-        var result: std.ArrayList(u8) = .{};
-        defer result.deinit(allocator);
+        // Use full Lua pattern gsub with capture replacement
+        const result = lua_pattern.gsub(allocator, source, pattern_str, replacement) catch {
+            return .{ .nil = {} };
+        };
 
-        var pos: usize = 0;
-        while (pos < source.len) {
-            if (std.mem.indexOf(u8, source[pos..], pattern)) |idx| {
-                const abs_idx = pos + idx;
-                // Copy everything before match
-                result.appendSlice(allocator, source[pos..abs_idx]) catch return .{ .nil = {} };
-                // Add replacement
-                result.appendSlice(allocator, replacement) catch return .{ .nil = {} };
-                pos = abs_idx + pattern.len;
-            } else {
-                // Copy rest of string
-                result.appendSlice(allocator, source[pos..]) catch return .{ .nil = {} };
-                break;
-            }
-        }
-
-        const owned = result.toOwnedSlice(allocator) catch return .{ .nil = {} };
-        return .{ .string = owned };
+        return .{ .string = result };
     }
 
     fn stringUpperFunction(args: []const ScriptValue) ScriptValue {

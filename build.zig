@@ -324,6 +324,44 @@ pub fn build(b: *std.Build) void {
     const run_scenarios = b.step("test-plugins", "Run plugin scenario tests");
     run_scenarios.dependOn(&run_plugin_scenarios_cmd.step);
 
+    // C-style syntax test
+    const c_style_test = b.addExecutable(.{
+        .name = "c_style_syntax_test",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/c_style_syntax_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ghostlang", .module = mod },
+            },
+        }),
+    });
+    c_style_test.root_module.addOptions("build_options", build_options);
+    b.installArtifact(c_style_test);
+
+    const run_c_style_test_cmd = b.addRunArtifact(c_style_test);
+    const run_c_style = b.step("test-c-style", "Run C-style syntax tests");
+    run_c_style.dependOn(&run_c_style_test_cmd.step);
+
+    // String and pattern matching benchmark
+    const string_bench = b.addExecutable(.{
+        .name = "string_bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("benchmarks/string_bench.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+            .imports = &.{
+                .{ .name = "ghostlang", .module = mod },
+            },
+        }),
+    });
+    string_bench.root_module.addOptions("build_options", build_options);
+    b.installArtifact(string_bench);
+
+    const run_string_bench_cmd = b.addRunArtifact(string_bench);
+    const run_string_bench = b.step("bench-string", "Run string and pattern matching benchmarks");
+    run_string_bench.dependOn(&run_string_bench_cmd.step);
+
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
     // The Zig build system is entirely implemented in userland, which means

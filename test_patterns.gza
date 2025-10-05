@@ -1,0 +1,71 @@
+-- Comprehensive Lua Pattern Matching Tests
+
+print("=== Ghostlang Pattern Matching Test Suite ===\n")
+
+-- Test 1: Character classes
+print("[1] Character classes:")
+local text1 = "Hello World 123!"
+local match1 = stringMatch(text1, "%a+")  -- Letters
+print("  %a+ on 'Hello World 123!': " .. (match1 or "FAIL"))
+
+local match2 = stringMatch(text1, "%d+")  -- Digits
+print("  %d+ found digits: " .. (match2 or "FAIL"))
+
+local match3 = stringMatch(text1, "%w+")  -- Alphanumeric
+print("  %w+ found: " .. (match3 or "FAIL"))
+
+-- Test 2: Quantifiers
+print("\n[2] Quantifiers:")
+local match4 = stringMatch("aaabbb", "a+")  -- One or more
+print("  a+ on 'aaabbb': " .. (match4 or "FAIL"))
+
+local match5 = stringMatch("aaabbb", "a*b+")  -- Zero or more + one or more
+print("  a*b+ on 'aaabbb': " .. (match5 or "FAIL"))
+
+-- Test 3: Character sets
+print("\n[3] Character sets:")
+local match6 = stringMatch("test123", "[0-9]+")  -- Range
+print("  [0-9]+ on 'test123': " .. (match6 or "FAIL"))
+
+local match7 = stringMatch("test", "[aeiou]+")  -- Vowels
+print("  [aeiou]+ on 'test': " .. (match7 or "FAIL"))
+
+-- Test 4: Anchors
+print("\n[4] Anchors:")
+local pos1 = stringFind("hello", "^h")  -- Start anchor
+print("  ^h finds 'h' at position: " .. (pos1 or "FAIL"))
+
+local match8 = stringMatch("test!", "!$")  -- End anchor
+print("  !$ matches end: " .. (match8 or "FAIL"))
+
+-- Test 5: Captures (critical for git!)
+print("\n[5] Captures (Git use case):")
+local ref = "ref: refs/heads/main"
+local branch = stringMatch(ref, "refs/heads/(%w+)")
+print("  Git branch extracted: " .. (branch or "FAIL"))
+
+-- Test 6: Global substitution
+print("\n[6] Global substitution:")
+local result1 = stringGsub("hello world", "l", "L")
+print("  'hello world' replace l->L: " .. result1)
+
+local result2 = stringGsub("test test test", "test", "best")
+print("  Replace all 'test': " .. result2)
+
+-- Test 7: Capture replacement
+print("\n[7] Capture replacement:")
+local result3 = stringGsub("hello world", "(%w+) (%w+)", "%2 %1")
+print("  Swap words: " .. result3)
+
+-- Test 8: Case conversion
+print("\n[8] Case conversion:")
+local upper = stringUpper("hello")
+local lower = stringLower("WORLD")
+print("  Upper: " .. upper .. ", Lower: " .. lower)
+
+-- Test 9: String formatting
+print("\n[9] String formatting:")
+local formatted = stringFormat("User: %s, Score: %d", "ghostkellz", 100)
+print("  " .. formatted)
+
+print("\n=== All Pattern Tests Complete ===")
