@@ -149,7 +149,7 @@ pub fn main() !void {
                 return;
             },
             else => {
-                std.debug.print("  Status: ✗ FAIL - unexpected error {s}\n", .{ @errorName(err) });
+                std.debug.print("  Status: ✗ FAIL - unexpected error {s}\n", .{@errorName(err)});
                 return err;
             },
         };

@@ -10,8 +10,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var prng = std.rand.DefaultPrng.init(@as(u64, @intCast(std.time.nanoTimestamp())));
-    const random = prng.random();
+    const random = std.crypto.random;
 
     var iteration: usize = 0;
     while (iteration < MaxIterations) : (iteration += 1) {
@@ -19,7 +18,7 @@ pub fn main() !void {
     }
 }
 
-fn fuzzOnce(random: std.rand.Random, allocator: std.mem.Allocator, iteration: usize) !void {
+fn fuzzOnce(random: anytype, allocator: std.mem.Allocator, iteration: usize) !void {
     const script_source = try makeCandidate(random, allocator, iteration);
     defer allocator.free(script_source);
 
@@ -68,7 +67,7 @@ fn fuzzOnce(random: std.rand.Random, allocator: std.mem.Allocator, iteration: us
     };
 }
 
-fn makeCandidate(random: std.rand.Random, allocator: std.mem.Allocator, iteration: usize) ![]u8 {
+fn makeCandidate(random: anytype, allocator: std.mem.Allocator, iteration: usize) ![]u8 {
     // Periodically replay structured seeds for coverage
     const seeds = [_][]const u8{
         "var x = 10",
@@ -84,19 +83,19 @@ fn makeCandidate(random: std.rand.Random, allocator: std.mem.Allocator, iteratio
         return allocator.dupe(u8, seeds[iteration]) catch unreachable;
     }
 
-    var buffer = std.ArrayList(u8).init(allocator);
-    errdefer buffer.deinit();
-
     const length = random.intRangeLessThan(usize, 0, MaxScriptLength);
+    if (length == 0) {
+        return allocator.dupe(u8, "var noop = 0");
+    }
+
+    var script = try allocator.alloc(u8, length);
+    errdefer allocator.free(script);
+
     var idx: usize = 0;
     while (idx < length) : (idx += 1) {
         const ch = Alphabet[random.int(u8) % Alphabet.len];
-        try buffer.append(ch);
+        script[idx] = ch;
     }
 
-    if (buffer.items.len == 0) {
-        try buffer.appendSlice("var noop = 0");
-    }
-
-    return try buffer.toOwnedSlice();
+    return script;
 }

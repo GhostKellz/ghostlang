@@ -55,6 +55,27 @@ pub fn main() !void {
         failed += 1;
     }
 
+    // Test 7: Generic iterators and function literals
+    if (try testGenericIteratorsAndFunctions(allocator)) {
+        passed += 1;
+    } else {
+        failed += 1;
+    }
+
+    // Test 8: Numeric for loop guardrails
+    if (try testNumericForStepGuard(allocator)) {
+        passed += 1;
+    } else {
+        failed += 1;
+    }
+
+    // Test 9: Closure captures and stateful functions
+    if (try testClosuresCapture(allocator)) {
+        passed += 1;
+    } else {
+        failed += 1;
+    }
+
     std.debug.print("\n=== Integration Test Summary ===\n", .{});
     std.debug.print("Passed: {}\n", .{passed});
     std.debug.print("Failed: {}\n", .{failed});
@@ -302,7 +323,122 @@ fn testControlFlowExtensions(allocator: std.mem.Allocator) !bool {
 
     switch (result) {
         .number => |value| std.debug.print("  ✗ FAIL - Expected 18, got {}\n\n", .{value}),
-        else => std.debug.print("  ✗ FAIL - Expected number, got {s}\n\n", .{ @tagName(result) }),
+        else => std.debug.print("  ✗ FAIL - Expected number, got {s}\n\n", .{@tagName(result)}),
+    }
+    return false;
+}
+
+fn testGenericIteratorsAndFunctions(allocator: std.mem.Allocator) !bool {
+    std.debug.print("Test 7: Generic Iterators & Functions\n", .{});
+
+    const config = ghostlang.EngineConfig{ .allocator = allocator };
+    var engine = try ghostlang.ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const script =
+        \\local function add_if_even(sum, value)
+        \\    if value % 2 == 0 then
+        \\        return sum + value
+        \\    end
+        \\    return sum
+        \\end
+        \\var mapping = { first = 2, second = 4, third = 5 }
+        \\var table_total = 0
+        \\for name, value in pairs(mapping) do
+        \\    table_total = add_if_even(table_total, value)
+        \\end
+        \\var list = [1, 2, 3]
+        \\var inc = function(x) return x + 10 end
+        \\var list_total = 0
+        \\for value in list do
+        \\    list_total = list_total + inc(value)
+        \\end
+        \\table_total + list_total
+    ;
+
+    var loaded = try engine.loadScript(script);
+    defer loaded.deinit();
+
+    const result = try loaded.run();
+    if (result == .number and result.number == 42) {
+        std.debug.print("  ✓ PASS - Generic iterators and functions operational\n\n", .{});
+        return true;
+    }
+
+    switch (result) {
+        .number => |value| std.debug.print("  ✗ FAIL - Expected 42, got {}\n\n", .{value}),
+        else => std.debug.print("  ✗ FAIL - Expected number, got {s}\n\n", .{@tagName(result)}),
+    }
+    return false;
+}
+
+fn testNumericForStepGuard(allocator: std.mem.Allocator) !bool {
+    std.debug.print("Test 8: Numeric For Step Guard\n", .{});
+
+    const config = ghostlang.EngineConfig{ .allocator = allocator };
+    var engine = try ghostlang.ScriptEngine.create(config);
+    defer engine.deinit();
+
+    var script = try engine.loadScript(
+        \\var total = 0
+        \\for i = 1, 3, 0 do
+        \\    total = total + i
+        \\end
+        \\total
+    );
+    defer script.deinit();
+
+    const run_result = script.run();
+    if (run_result) |value| {
+        std.debug.print("  ✗ FAIL - Expected ExecutionTimeout error, got value {s}\n\n", .{@tagName(value)});
+        return false;
+    } else |err| {
+        if (err == ghostlang.ExecutionError.ExecutionTimeout) {
+            std.debug.print("  ✓ PASS - Zero step rejected via execution timeout\n\n", .{});
+            return true;
+        }
+        std.debug.print("  ✗ FAIL - Expected ExecutionTimeout, got {s}\n\n", .{@errorName(err)});
+        return false;
+    }
+}
+
+fn testClosuresCapture(allocator: std.mem.Allocator) !bool {
+    std.debug.print("Test 9: Closure Captures\n", .{});
+
+    const config = ghostlang.EngineConfig{ .allocator = allocator };
+    var engine = try ghostlang.ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const script =
+        \\local function make_counter(start)
+        \\    local count = start
+        \\    return function()
+        \\        count = count + 1
+        \\        return count
+        \\    end
+        \\end
+        \\var first = make_counter(0)
+        \\var second = make_counter(5)
+        \\var total = 0
+        \\total = total + first()
+        \\total = total + first()
+        \\total = total + second()
+        \\total = total + second()
+        \\return total
+    ;
+
+    var loaded = try engine.loadScript(script);
+    defer loaded.deinit();
+
+    const result = try loaded.run();
+    if (result == .number and result.number == 16) {
+        std.debug.print("  ✓ PASS - Closures capture lexical state correctly\n\n", .{});
+        return true;
+    }
+
+    switch (result) {
+        .number => |value| std.debug.print("  ✗ FAIL - Expected 16, got {}\n\n", .{value}),
+        else => std.debug.print("  ✗ FAIL - Expected number, got {s}\n\n", .{@tagName(result)}),
     }
     return false;
 }

@@ -99,12 +99,17 @@ while (condition) {
     // code
 }
 
-// No for loop yet - use while
-var i = 1
-while (i < 11) {
-    // code
-    i = i + 1
-}
+for i = 1, 10 do
+    -- Lua-style numeric loop syntax now supported
+end
+
+for index, value in pairs(items) do
+    -- Generic iterator loop (first variable required, second optional)
+end
+
+repeat
+    -- code
+until condition
 ```
 
 ---
@@ -234,13 +239,28 @@ end
 
 local result = add(3, 4)
 
--- Ghostlang (currently limited)
-// Built-in functions only
-var result = len("hello")  // 5
-print("Result:", result)
+-- Ghostlang
+function add(a, b)
+    return a + b
+end
+
+local double = function(x)
+    return x * 2
+end
+
+local result = add(3, 4)
+var scaled = double(result)  // 14
+
+local function accumulator()
+    var total = 0
+    return function(value)
+        total = total + value
+        return total
+    end
+end
 ```
 
-**Note**: Ghostlang currently doesn't support user-defined functions in scripts. Use built-in functions and editor API.
+Ghostlang now supports global functions, `local function` declarations, and anonymous `function (...) ... end` expressions. Both brace-style bodies and Lua-style `... end` blocks are accepted.
 
 ### Built-in Functions Comparison
 
@@ -432,14 +452,16 @@ setSelection(start_line, start_col, end_line, end_col)
 - ✅ Comparison operators (`==`, `!=`, `<`, `>`, `<=`, `>=`)
 - ✅ Boolean logic (`&&`, `||`)
 - ✅ While loops
-- ✅ If/else statements
+- ✅ If/else statements (brace or Lua style)
 - ✅ Built-in functions (len, print, type)
 - ✅ Editor API (buffer, cursor, selection)
+- ✅ Numeric `for` loops (`for i = start, stop[, step] do ... end`)
+- ✅ Generic iterator loops (`for key[, value] in iterator do ... end`)
+- ✅ `repeat ... until` loops
+- ✅ User-defined functions (global, local, anonymous)
+- ✅ Iterator helpers (`pairs`, `ipairs`) returning ScriptIterator objects
 
 ### What Ghostlang Lacks (vs Lua)
-
-- ❌ User-defined functions
-- ❌ For loops
 - ❌ Tables (limited support)
 - ❌ Metatables
 - ❌ Coroutines

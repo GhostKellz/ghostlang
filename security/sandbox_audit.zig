@@ -345,12 +345,12 @@ fn testMaliciousInputs(allocator: std.mem.Allocator) !bool {
     defer engine.deinit();
 
     const malicious_inputs = [_][]const u8{
-        "\x00\x00\x00",         // Null bytes
-        "\xff\xff\xff",         // Invalid UTF-8
-        "💀💀💀",                // Unicode
+        "\x00\x00\x00", // Null bytes
+        "\xff\xff\xff", // Invalid UTF-8
+        "💀💀💀", // Unicode
         "((((((((((((((((((", // Unbalanced
-        ";;;;;;;;;;;;;;;",     // Excessive semicolons
-        "var var var var",     // Repeated keywords
+        ";;;;;;;;;;;;;;;", // Excessive semicolons
+        "var var var var", // Repeated keywords
     };
 
     for (malicious_inputs) |input| {

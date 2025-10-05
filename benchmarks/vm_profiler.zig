@@ -159,8 +159,8 @@ const InstructionRecorder = struct {
 
 fn recordOpcode(context: ?*anyopaque, opcode: ghostlang.Opcode) void {
     if (context) |ptr| {
-    const addr = @intFromPtr(ptr);
-    const ctx: *InstructionRecorder = @ptrFromInt(addr);
+        const addr = @intFromPtr(ptr);
+        const ctx: *InstructionRecorder = @ptrFromInt(addr);
         ctx.profiler.recordInstruction(@intFromEnum(opcode), 0);
     }
 }

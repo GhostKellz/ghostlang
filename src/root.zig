@@ -87,28 +87,60 @@ const ScriptFunction = struct {
     start_pc: usize,
     end_pc: usize,
     param_names: [][]const u8,
+    capture_names: [][]const u8,
+    captures: std.StringHashMap(ScriptValue),
     ref_count: usize,
+    is_vararg: bool,
 
-    pub fn init(allocator: std.mem.Allocator, start_pc: usize, end_pc: usize, param_names: []const []const u8) !*ScriptFunction {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        start_pc: usize,
+        end_pc: usize,
+        param_names: []const []const u8,
+        capture_names: []const []const u8,
+    ) !*ScriptFunction {
         var func = try allocator.create(ScriptFunction);
         func.* = .{
             .allocator = allocator,
             .start_pc = start_pc,
             .end_pc = end_pc,
             .param_names = &[_][]const u8{},
+            .capture_names = &[_][]const u8{},
+            .captures = std.StringHashMap(ScriptValue).init(allocator),
             .ref_count = 1,
+            .is_vararg = false,
         };
 
         func.param_names = try allocator.alloc([]const u8, param_names.len);
         var idx: usize = 0;
+        errdefer {
+            while (idx > 0) {
+                idx -= 1;
+                allocator.free(func.param_names[idx]);
+            }
+            allocator.free(func.param_names);
+            func.captures.deinit();
+            allocator.destroy(func);
+        }
+
         while (idx < param_names.len) : (idx += 1) {
             func.param_names[idx] = allocator.dupe(u8, param_names[idx]) catch |err| {
-                while (idx > 0) {
-                    idx -= 1;
-                    allocator.free(func.param_names[idx]);
-                }
-                allocator.free(func.param_names);
-                allocator.destroy(func);
+                return err;
+            };
+        }
+
+        func.capture_names = try allocator.alloc([]const u8, capture_names.len);
+        var cap_idx: usize = 0;
+        errdefer {
+            while (cap_idx > 0) {
+                cap_idx -= 1;
+                allocator.free(func.capture_names[cap_idx]);
+            }
+            allocator.free(func.capture_names);
+        }
+
+        while (cap_idx < capture_names.len) : (cap_idx += 1) {
+            func.capture_names[cap_idx] = allocator.dupe(u8, capture_names[cap_idx]) catch |err| {
                 return err;
             };
         }
@@ -124,12 +156,56 @@ const ScriptFunction = struct {
         if (self.ref_count == 0) return;
         self.ref_count -= 1;
         if (self.ref_count == 0) {
+            var cap_it = self.captures.iterator();
+            while (cap_it.next()) |entry| {
+                self.allocator.free(entry.key_ptr.*);
+                entry.value_ptr.deinit(self.allocator);
+            }
+            self.captures.deinit();
+
             for (self.param_names) |name| {
                 self.allocator.free(name);
             }
             self.allocator.free(self.param_names);
+
+            for (self.capture_names) |name| {
+                self.allocator.free(name);
+            }
+            self.allocator.free(self.capture_names);
+
             self.allocator.destroy(self);
         }
+    }
+
+    pub fn addCapture(self: *ScriptFunction, name: []const u8, value: ScriptValue) !void {
+        if (self.captures.getEntry(name)) |entry| {
+            const copy = try copyScriptValue(self.allocator, value);
+            entry.value_ptr.deinit(self.allocator);
+            entry.value_ptr.* = copy;
+            return;
+        }
+
+        const name_copy = try self.allocator.dupe(u8, name);
+        errdefer self.allocator.free(name_copy);
+
+        var value_copy = try copyScriptValue(self.allocator, value);
+        errdefer value_copy.deinit(self.allocator);
+
+        self.captures.put(name_copy, value_copy) catch |err| {
+            if (err == error.OutOfMemory) return err;
+            return err;
+        };
+    }
+
+    pub fn getCapture(self: *ScriptFunction, name: []const u8) ?ScriptValue {
+        if (self.captures.get(name)) |value| {
+            return value;
+        }
+        return null;
+    }
+
+    pub fn markVarArg(self: *ScriptFunction, enable: bool) void {
+        self.is_vararg = enable;
     }
 };
 
@@ -208,6 +284,8 @@ pub const ScriptValueType = enum {
     script_function,
     table,
     array,
+    iterator,
+    upvalue,
 };
 
 pub const ScriptValue = union(ScriptValueType) {
@@ -219,6 +297,8 @@ pub const ScriptValue = union(ScriptValueType) {
     script_function: *ScriptFunction,
     table: *ScriptTable,
     array: *ScriptArray,
+    iterator: *ScriptIterator,
+    upvalue: *ScriptUpvalue,
 
     pub fn deinit(self: *ScriptValue, allocator: std.mem.Allocator) void {
         switch (self.*) {
@@ -232,8 +312,230 @@ pub const ScriptValue = union(ScriptValueType) {
             .script_function => |func| {
                 func.release();
             },
+            .iterator => |iter| {
+                iter.release();
+            },
+            .upvalue => |up| {
+                up.release();
+            },
             else => {},
         }
+    }
+};
+
+const ScriptIterator = struct {
+    const Kind = enum { array, table };
+    const IteratorError = error{ OutOfMemory, TypeError };
+
+    allocator: std.mem.Allocator,
+    ref_count: usize,
+    kind: Kind,
+    state: union(Kind) {
+        array: struct {
+            array_ptr: *ScriptArray,
+            index: usize,
+        },
+        table: struct {
+            table_ptr: *ScriptTable,
+            keys: std.ArrayListUnmanaged([]const u8),
+            index: usize,
+        },
+    },
+    current_key: ScriptValue,
+    current_value: ScriptValue,
+    has_key: bool,
+    has_value: bool,
+    result_arity: u16,
+
+    pub fn createFromArray(allocator: std.mem.Allocator, array_ptr: *ScriptArray) !*ScriptIterator {
+        const iterator = try allocator.create(ScriptIterator);
+        iterator.* = .{
+            .allocator = allocator,
+            .ref_count = 1,
+            .kind = .array,
+            .state = .{ .array = .{ .array_ptr = array_ptr, .index = 0 } },
+            .current_key = .{ .nil = {} },
+            .current_value = .{ .nil = {} },
+            .has_key = false,
+            .has_value = false,
+            .result_arity = 1,
+        };
+        array_ptr.retain();
+        return iterator;
+    }
+
+    pub fn createFromTable(allocator: std.mem.Allocator, table_ptr: *ScriptTable) !*ScriptIterator {
+        const iterator = try allocator.create(ScriptIterator);
+        iterator.* = .{
+            .allocator = allocator,
+            .ref_count = 1,
+            .kind = .table,
+            .state = .{ .table = .{ .table_ptr = table_ptr, .keys = .{}, .index = 0 } },
+            .current_key = .{ .nil = {} },
+            .current_value = .{ .nil = {} },
+            .has_key = false,
+            .has_value = false,
+            .result_arity = 2,
+        };
+        table_ptr.retain();
+
+        var it = table_ptr.map.iterator();
+        errdefer iterator.release();
+
+        while (it.next()) |entry| {
+            const key_copy = allocator.dupe(u8, entry.key_ptr.*) catch {
+                return IteratorError.OutOfMemory;
+            };
+            iterator.state.table.keys.append(allocator, key_copy) catch {
+                allocator.free(key_copy);
+                return IteratorError.OutOfMemory;
+            };
+        }
+
+        return iterator;
+    }
+
+    pub fn configure(self: *ScriptIterator, var_count: u16) void {
+        const clamped = if (var_count == 0) 1 else if (var_count > 2) 2 else var_count;
+        self.result_arity = clamped;
+    }
+
+    pub fn retain(self: *ScriptIterator) void {
+        self.ref_count += 1;
+    }
+
+    pub fn release(self: *ScriptIterator) void {
+        if (self.ref_count == 0) return;
+        self.ref_count -= 1;
+        if (self.ref_count == 0) {
+            self.clearCurrent();
+            switch (self.kind) {
+                .array => self.state.array.array_ptr.release(),
+                .table => {
+                    var idx: usize = 0;
+                    while (idx < self.state.table.keys.items.len) : (idx += 1) {
+                        self.allocator.free(self.state.table.keys.items[idx]);
+                    }
+                    self.state.table.keys.deinit(self.allocator);
+                    self.state.table.table_ptr.release();
+                },
+            }
+            self.allocator.destroy(self);
+        }
+    }
+
+    fn clearCurrent(self: *ScriptIterator) void {
+        if (self.has_key) {
+            self.current_key.deinit(self.allocator);
+            self.current_key = .{ .nil = {} };
+            self.has_key = false;
+        }
+        if (self.has_value) {
+            self.current_value.deinit(self.allocator);
+            self.current_value = .{ .nil = {} };
+            self.has_value = false;
+        }
+    }
+
+    pub fn next(self: *ScriptIterator) IteratorError!bool {
+        self.clearCurrent();
+        switch (self.kind) {
+            .array => {
+                const array_ptr = self.state.array.array_ptr;
+                if (self.state.array.index >= array_ptr.items.items.len) {
+                    return false;
+                }
+                const idx = self.state.array.index;
+                self.state.array.index += 1;
+
+                self.current_value = try copyScriptValue(self.allocator, array_ptr.items.items[idx]);
+                self.has_value = true;
+
+                if (self.result_arity >= 2) {
+                    self.current_key = .{ .number = @floatFromInt(idx + 1) };
+                    self.has_key = true;
+                }
+
+                return true;
+            },
+            .table => {
+                const table_state = &self.state.table;
+                if (table_state.index >= table_state.keys.items.len) {
+                    return false;
+                }
+                const key_slice = table_state.keys.items[table_state.index];
+                table_state.index += 1;
+
+                const key_copy = self.allocator.dupe(u8, key_slice) catch {
+                    return IteratorError.OutOfMemory;
+                };
+                self.current_key = .{ .string = key_copy };
+                self.has_key = true;
+
+                if (table_state.table_ptr.map.get(key_slice)) |value| {
+                    self.current_value = try copyScriptValue(self.allocator, value);
+                    self.has_value = true;
+                    return true;
+                }
+
+                self.clearCurrent();
+                return IteratorError.TypeError;
+            },
+        }
+    }
+};
+
+const ScriptUpvalue = struct {
+    allocator: std.mem.Allocator,
+    ref_count: usize,
+    cell: ScriptValue,
+
+    pub fn createFromValue(allocator: std.mem.Allocator, value: ScriptValue) !*ScriptUpvalue {
+        const up = try allocator.create(ScriptUpvalue);
+        up.* = .{
+            .allocator = allocator,
+            .ref_count = 1,
+            .cell = try copyScriptValue(allocator, value),
+        };
+        return up;
+    }
+
+    pub fn createFromOwnedValue(allocator: std.mem.Allocator, value: ScriptValue) !*ScriptUpvalue {
+        const up = try allocator.create(ScriptUpvalue);
+        up.* = .{
+            .allocator = allocator,
+            .ref_count = 1,
+            .cell = value,
+        };
+        return up;
+    }
+
+    pub fn retain(self: *ScriptUpvalue) void {
+        self.ref_count += 1;
+    }
+
+    pub fn release(self: *ScriptUpvalue) void {
+        if (self.ref_count == 0) return;
+        self.ref_count -= 1;
+        if (self.ref_count == 0) {
+            self.cell.deinit(self.allocator);
+            self.allocator.destroy(self);
+        }
+    }
+
+    pub fn getCopy(self: *ScriptUpvalue, allocator: std.mem.Allocator) !ScriptValue {
+        return try copyScriptValue(allocator, self.cell);
+    }
+
+    pub fn set(self: *ScriptUpvalue, value: ScriptValue) !void {
+        const new_copy = try copyScriptValue(self.allocator, value);
+        self.cell.deinit(self.allocator);
+        self.cell = new_copy;
+    }
+
+    pub fn setOwned(self: *ScriptUpvalue, value: ScriptValue) void {
+        self.cell.deinit(self.allocator);
+        self.cell = value;
     }
 };
 
@@ -251,6 +553,14 @@ fn copyScriptValue(allocator: std.mem.Allocator, value: ScriptValue) !ScriptValu
         .script_function => |func| blk: {
             func.retain();
             break :blk ScriptValue{ .script_function = func };
+        },
+        .iterator => |iter| blk: {
+            iter.retain();
+            break :blk ScriptValue{ .iterator = iter };
+        },
+        .upvalue => |up| blk: {
+            up.retain();
+            break :blk ScriptValue{ .upvalue = up };
         },
         else => value,
     };
@@ -1379,7 +1689,14 @@ pub const VM = struct {
                     const reg = instr.operands[0];
                     const const_idx = instr.operands[1];
                     const const_index = operandIndex(const_idx);
-                    const copy = try self.copyValue(self.constants[const_index]);
+                    const value = self.constants[const_index];
+                    const copy = switch (value) {
+                        .script_function => |template| blk: {
+                            const instance = try self.instantiateFunction(template);
+                            break :blk ScriptValue{ .script_function = instance };
+                        },
+                        else => try self.copyValue(value),
+                    };
                     self.setRegister(reg, copy);
                 },
                 .new_table => {
@@ -1738,7 +2055,7 @@ pub const VM = struct {
                     const name = self.constants[const_idx];
                     if (name == .string) {
                         if (self.getVariable(name.string)) |value| {
-                            const copy = try self.copyValue(value);
+                            const copy = try self.copyResolvedValue(value);
                             self.setRegister(reg, copy);
                         } else {
                             return ExecutionError.UndefinedVariable;
@@ -1808,16 +2125,26 @@ pub const VM = struct {
         else
             &self.globals;
 
-        // Copy the value to ensure we own it
-        const value_copy = try self.copyValue(value);
-
         if (target.getEntry(name)) |entry| {
-            entry.value_ptr.deinit(self.allocator);
-            entry.value_ptr.* = value_copy;
+            switch (entry.value_ptr.*) {
+                .upvalue => |up| try up.set(value),
+                else => {
+                    entry.value_ptr.deinit(self.allocator);
+                    entry.value_ptr.* = try self.copyValue(value);
+                },
+            }
             return;
         }
         const name_copy = try self.allocator.dupe(u8, name);
-        try target.put(name_copy, value_copy);
+        var value_copy = try self.copyValue(value);
+        target.put(name_copy, value_copy) catch |err| {
+            value_copy.deinit(self.allocator);
+            self.allocator.free(name_copy);
+            if (err == error.OutOfMemory) {
+                return ExecutionError.OutOfMemory;
+            }
+            return err;
+        };
     }
 
     fn declareLocal(self: *VM, name: []const u8, value: ScriptValue) !void {
@@ -1826,34 +2153,57 @@ pub const VM = struct {
             return;
         }
 
-        const value_copy = try self.copyValue(value);
         var frame = &self.scopes.items[self.scopes.items.len - 1].map;
         if (frame.getEntry(name)) |entry| {
-            entry.value_ptr.deinit(self.allocator);
-            entry.value_ptr.* = value_copy;
+            switch (entry.value_ptr.*) {
+                .upvalue => |up| try up.set(value),
+                else => {
+                    const value_copy = try self.copyValue(value);
+                    entry.value_ptr.deinit(self.allocator);
+                    entry.value_ptr.* = value_copy;
+                },
+            }
             return;
         }
 
         const name_copy = try self.allocator.dupe(u8, name);
-        try frame.put(name_copy, value_copy);
+        const value_copy = try self.copyValue(value);
+        frame.put(name_copy, value_copy) catch |err| {
+            var tmp_value = value_copy;
+            tmp_value.deinit(self.allocator);
+            self.allocator.free(name_copy);
+            if (err == error.OutOfMemory) {
+                return ExecutionError.OutOfMemory;
+            }
+            return err;
+        };
     }
 
     fn assignVariable(self: *VM, name: []const u8, value: ScriptValue) !void {
-        // Copy the value to ensure we own it
-        const value_copy = try self.copyValue(value);
-
         var idx = self.scopes.items.len;
         while (idx > 0) {
             idx -= 1;
             if (self.scopes.items[idx].map.getEntry(name)) |entry| {
-                entry.value_ptr.deinit(self.allocator);
-                entry.value_ptr.* = value_copy;
+                switch (entry.value_ptr.*) {
+                    .upvalue => |up| try up.set(value),
+                    else => {
+                        const value_copy = try self.copyValue(value);
+                        entry.value_ptr.deinit(self.allocator);
+                        entry.value_ptr.* = value_copy;
+                    },
+                }
                 return;
             }
         }
         if (self.globals.getEntry(name)) |entry| {
-            entry.value_ptr.deinit(self.allocator);
-            entry.value_ptr.* = value_copy;
+            switch (entry.value_ptr.*) {
+                .upvalue => |up| try up.set(value),
+                else => {
+                    const value_copy = try self.copyValue(value);
+                    entry.value_ptr.deinit(self.allocator);
+                    entry.value_ptr.* = value_copy;
+                },
+            }
             return;
         }
         try self.declareVariable(name, value);
@@ -1884,11 +2234,74 @@ pub const VM = struct {
             try self.declareVariable(param_name, arg_value);
         }
 
+        var cap_it = func.captures.iterator();
+        while (cap_it.next()) |entry| {
+            try self.declareVariable(entry.key_ptr.*, entry.value_ptr.*);
+        }
+
         self.pc = func.start_pc;
     }
 
     fn copyValue(self: *VM, value: ScriptValue) !ScriptValue {
         return try copyScriptValue(self.allocator, value);
+    }
+
+    fn copyResolvedValue(self: *VM, value: ScriptValue) !ScriptValue {
+        return switch (value) {
+            .upvalue => |up| try up.getCopy(self.allocator),
+            else => try self.copyValue(value),
+        };
+    }
+
+    fn instantiateFunction(self: *VM, template: *ScriptFunction) !*ScriptFunction {
+        const instance = try ScriptFunction.init(self.allocator, template.start_pc, template.end_pc, template.param_names, template.capture_names);
+        errdefer instance.release();
+
+        instance.markVarArg(template.is_vararg);
+
+        var idx: usize = 0;
+        while (idx < template.capture_names.len) : (idx += 1) {
+            const name = template.capture_names[idx];
+            if (self.findScopeEntry(name)) |entry| {
+                const up = try self.promoteEntryToUpvalue(entry);
+                try instance.addCapture(name, .{ .upvalue = up });
+                continue;
+            }
+            if (self.globals.getEntry(name)) |entry| {
+                try instance.addCapture(name, entry.value_ptr.*);
+                continue;
+            }
+            if (self.engine.globals.get(name)) |value| {
+                try instance.addCapture(name, value);
+                continue;
+            }
+            try instance.addCapture(name, .{ .nil = {} });
+        }
+
+        return instance;
+    }
+
+    fn findScopeEntry(self: *VM, name: []const u8) ?*ScriptValue {
+        var idx = self.scopes.items.len;
+        while (idx > 0) {
+            idx -= 1;
+            if (self.scopes.items[idx].map.getEntry(name)) |entry| {
+                return entry.value_ptr;
+            }
+        }
+        return null;
+    }
+
+    fn promoteEntryToUpvalue(self: *VM, entry: *ScriptValue) !*ScriptUpvalue {
+        return switch (entry.*) {
+            .upvalue => |up| up,
+            else => blk: {
+                const up = try ScriptUpvalue.createFromValue(self.allocator, entry.*);
+                entry.deinit(self.allocator);
+                entry.* = .{ .upvalue = up };
+                break :blk up;
+            },
+        };
     }
 
     fn tableSetField(self: *VM, table: *ScriptTable, key: []const u8, value: ScriptValue) ExecutionError!void {
@@ -2019,6 +2432,14 @@ pub const VM = struct {
                 .array => |barray| return aarray == barray,
                 else => return false,
             },
+            .iterator => |aiter| switch (b) {
+                .iterator => |biter| return aiter == biter,
+                else => return false,
+            },
+            .upvalue => |aupv| switch (b) {
+                .upvalue => |bupv| return aupv == bupv,
+                else => return false,
+            },
         }
     }
 };
@@ -2071,6 +2492,8 @@ pub const BuiltinFunctions = struct {
                 .script_function => std.debug.print("<function>", .{}),
                 .table => std.debug.print("<table>", .{}),
                 .array => std.debug.print("<array>", .{}),
+                .iterator => std.debug.print("<iterator>", .{}),
+                .upvalue => std.debug.print("<upvalue>", .{}),
             }
             if (i < args.len - 1) std.debug.print(" ", .{});
         }
@@ -2089,6 +2512,8 @@ pub const BuiltinFunctions = struct {
             .script_function => "function",
             .table => "table",
             .array => "array",
+            .iterator => "iterator",
+            .upvalue => "upvalue",
         };
         // TODO: Allocate string properly
         return .{ .string = type_name };
@@ -2468,8 +2893,76 @@ pub const Parser = struct {
         }
     };
 
+    const ScopeBinding = struct {
+        function_depth: usize,
+        names: std.ArrayListUnmanaged([]const u8),
+
+        fn init(function_depth: usize) ScopeBinding {
+            return .{ .function_depth = function_depth, .names = .{} };
+        }
+
+        fn deinit(self: *ScopeBinding, allocator: std.mem.Allocator) void {
+            for (self.names.items) |name| {
+                allocator.free(name);
+            }
+            self.names.deinit(allocator);
+        }
+    };
+
     const FunctionContext = struct {
         base_scope_depth: usize,
+        params_registered: bool,
+        pending_params: std.ArrayListUnmanaged([]const u8),
+        capture_names: std.ArrayListUnmanaged([]const u8),
+
+        fn init(base_scope_depth: usize) FunctionContext {
+            return .{
+                .base_scope_depth = base_scope_depth,
+                .params_registered = false,
+                .pending_params = .{},
+                .capture_names = .{},
+            };
+        }
+
+        fn deinit(self: *FunctionContext, allocator: std.mem.Allocator) void {
+            for (self.pending_params.items) |name| {
+                allocator.free(name);
+            }
+            self.pending_params.deinit(allocator);
+            for (self.capture_names.items) |name| {
+                allocator.free(name);
+            }
+            self.capture_names.deinit(allocator);
+        }
+
+        fn addPendingParam(self: *FunctionContext, allocator: std.mem.Allocator, name: []const u8) !void {
+            const dup = try allocator.dupe(u8, name);
+            errdefer allocator.free(dup);
+            try self.pending_params.append(allocator, dup);
+        }
+
+        fn addCapture(self: *FunctionContext, allocator: std.mem.Allocator, name: []const u8) !void {
+            for (self.capture_names.items) |existing| {
+                if (std.mem.eql(u8, existing, name)) {
+                    return;
+                }
+            }
+            const dup = try allocator.dupe(u8, name);
+            errdefer allocator.free(dup);
+            try self.capture_names.append(allocator, dup);
+        }
+
+        fn takeCaptureNames(self: *FunctionContext, allocator: std.mem.Allocator) ![]const []const u8 {
+            const slice = try allocator.alloc([]const u8, self.capture_names.items.len);
+            for (self.capture_names.items, 0..) |name, idx| {
+                slice[idx] = try allocator.dupe(u8, name);
+                allocator.free(name);
+            }
+            self.capture_names.items.len = 0;
+            self.capture_names.deinit(allocator);
+            self.capture_names = .{};
+            return slice;
+        }
     };
 
     allocator: std.mem.Allocator,
@@ -2481,6 +2974,7 @@ pub const Parser = struct {
     scope_depth: usize,
     loop_stack: std.ArrayListUnmanaged(LoopContext),
     function_stack: std.ArrayListUnmanaged(FunctionContext),
+    scope_bindings: std.ArrayListUnmanaged(ScopeBinding),
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8) Parser {
         return Parser{
@@ -2493,6 +2987,7 @@ pub const Parser = struct {
             .scope_depth = 0,
             .loop_stack = .{},
             .function_stack = .{},
+            .scope_bindings = .{},
         };
     }
 
@@ -2503,7 +2998,16 @@ pub const Parser = struct {
                 self.loop_stack.items[idx].deinit(self.allocator);
             }
             self.loop_stack.deinit(self.allocator);
+            var fn_idx: usize = 0;
+            while (fn_idx < self.function_stack.items.len) : (fn_idx += 1) {
+                self.function_stack.items[fn_idx].deinit(self.allocator);
+            }
             self.function_stack.deinit(self.allocator);
+            var bind_idx: usize = 0;
+            while (bind_idx < self.scope_bindings.items.len) : (bind_idx += 1) {
+                self.scope_bindings.items[bind_idx].deinit(self.allocator);
+            }
+            self.scope_bindings.deinit(self.allocator);
         }
 
         var constants: std.ArrayListUnmanaged(ScriptValue) = .{};
@@ -2551,12 +3055,28 @@ pub const Parser = struct {
     fn appendBeginScope(self: *Parser, instructions: *std.ArrayListUnmanaged(Instruction)) !void {
         try instructions.append(self.allocator, .{ .opcode = .begin_scope, .operands = [_]u16{ 0, 0, 0 } });
         self.scope_depth += 1;
+
+    const binding = ScopeBinding.init(self.function_stack.items.len);
+        try self.scope_bindings.append(self.allocator, binding);
+
+        if (self.function_stack.items.len > 0) {
+            const fn_ctx = &self.function_stack.items[self.function_stack.items.len - 1];
+            if (!fn_ctx.params_registered and self.scope_depth == fn_ctx.base_scope_depth + 1) {
+                try self.registerPendingParams();
+            }
+        }
     }
 
     fn appendEndScope(self: *Parser, instructions: *std.ArrayListUnmanaged(Instruction)) !void {
         if (self.scope_depth == 0) {
             return error.ParseError;
         }
+        if (self.scope_bindings.items.len == 0) {
+            return error.ParseError;
+        }
+        var binding = self.scope_bindings.items[self.scope_bindings.items.len - 1];
+        self.scope_bindings.items.len -= 1;
+        binding.deinit(self.allocator);
         try instructions.append(self.allocator, .{ .opcode = .end_scope, .operands = [_]u16{ 0, 0, 0 } });
         self.scope_depth -= 1;
     }
@@ -2565,6 +3085,58 @@ pub const Parser = struct {
         var i: usize = 0;
         while (i < count) : (i += 1) {
             try instructions.append(self.allocator, .{ .opcode = .end_scope, .operands = [_]u16{ 0, 0, 0 } });
+        }
+    }
+
+    fn registerLocalOwned(self: *Parser, name: []const u8) !void {
+        if (self.scope_bindings.items.len == 0) {
+            self.allocator.free(name);
+            return;
+        }
+        try self.scope_bindings.items[self.scope_bindings.items.len - 1].names.append(self.allocator, name);
+    }
+
+    fn registerLocalCopy(self: *Parser, name: []const u8) !void {
+        const dup = try self.allocator.dupe(u8, name);
+        errdefer self.allocator.free(dup);
+        try self.registerLocalOwned(dup);
+    }
+
+    fn resolveBindingFunctionDepth(self: *Parser, name: []const u8) ?usize {
+        var idx = self.scope_bindings.items.len;
+        while (idx > 0) : (idx -= 1) {
+            const binding = &self.scope_bindings.items[idx - 1];
+            for (binding.names.items) |existing| {
+                if (std.mem.eql(u8, existing, name)) {
+                    return binding.function_depth;
+                }
+            }
+        }
+        return null;
+    }
+
+    fn registerPendingParams(self: *Parser) !void {
+        if (self.function_stack.items.len == 0) return;
+        var fn_ctx = &self.function_stack.items[self.function_stack.items.len - 1];
+        if (fn_ctx.params_registered) return;
+        for (fn_ctx.pending_params.items) |param| {
+            try self.registerLocalOwned(param);
+        }
+        fn_ctx.pending_params.items.len = 0;
+        fn_ctx.pending_params.deinit(self.allocator);
+        fn_ctx.pending_params = .{};
+        fn_ctx.params_registered = true;
+    }
+
+    fn noteIdentifierUsage(self: *Parser, name: []const u8) !void {
+        const current_depth = self.function_stack.items.len;
+        if (current_depth == 0) return;
+        const binding_depth = self.resolveBindingFunctionDepth(name) orelse return;
+        if (binding_depth == 0 or binding_depth == current_depth) return;
+        var depth = binding_depth + 1;
+        while (depth <= current_depth) : (depth += 1) {
+            const ctx_index = depth - 1;
+            try self.function_stack.items[ctx_index].addCapture(self.allocator, name);
         }
     }
 
@@ -2701,6 +3273,7 @@ pub const Parser = struct {
                 const var_name = try self.parseIdent();
                 defer self.allocator.free(var_name);
                 self.skipWhitespace();
+                try self.registerLocalCopy(var_name);
                 try self.expect('=');
                 self.skipWhitespace();
                 const expr = try self.parseExpression(constants, instructions, 0);
@@ -2723,6 +3296,7 @@ pub const Parser = struct {
             } else {
                 self.skipWhitespace();
                 if (self.peek() == '=' and self.peekNext() != '=') {
+                    try self.noteIdentifierUsage(ident);
                     self.advance();
                     self.skipWhitespace();
                     const expr = try self.parseExpression(constants, instructions, 0);
@@ -2900,6 +3474,10 @@ pub const Parser = struct {
         try self.appendBeginScope(instructions);
         loop_ctx.loop_scope_base = self.scope_depth;
 
+    try self.registerLocalCopy(iter_name);
+    try self.registerLocalCopy(limit_name);
+    try self.registerLocalCopy(step_name);
+
         try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ start_expr.result_reg, iter_name_idx, 1 } });
         try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ end_expr.result_reg, limit_name_idx, 1 } });
 
@@ -2915,11 +3493,16 @@ pub const Parser = struct {
 
         const bool_base: u16 = if (step_expr) |expr| expr.next_reg else step_reg + 1;
         var next_reg = bool_base;
-        const cond_pos_reg = next_reg; next_reg += 1;
-        const cmp_pos_reg = next_reg; next_reg += 1;
-        const cmp_neg_reg = next_reg; next_reg += 1;
-        const not_pos_reg = next_reg; next_reg += 1;
-        const cond_final_reg = next_reg; next_reg += 1;
+        const cond_pos_reg = next_reg;
+        next_reg += 1;
+        const cmp_pos_reg = next_reg;
+        next_reg += 1;
+        const cmp_neg_reg = next_reg;
+        next_reg += 1;
+        const not_pos_reg = next_reg;
+        next_reg += 1;
+        const cond_final_reg = next_reg;
+        next_reg += 1;
 
         loop_ctx.result_reg = cond_final_reg;
 
@@ -3000,6 +3583,9 @@ pub const Parser = struct {
 
         try self.appendBeginScope(instructions);
         loop_ctx.loop_scope_base = self.scope_depth;
+
+    try self.registerLocalCopy(iter_name);
+    try self.registerLocalCopy(end_name);
 
         try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ start_expr.result_reg, iter_name_idx, 1 } });
         try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ end_expr.result_reg, end_name_idx, 1 } });
@@ -3122,8 +3708,20 @@ pub const Parser = struct {
         const body_start_idx = instructions.items.len;
 
         const ctx_index = self.function_stack.items.len;
-        try self.function_stack.append(self.allocator, .{ .base_scope_depth = self.scope_depth });
-        errdefer self.function_stack.items.len = ctx_index;
+        const new_ctx = FunctionContext.init(self.scope_depth);
+        try self.function_stack.append(self.allocator, new_ctx);
+        errdefer {
+            var ctx = &self.function_stack.items[self.function_stack.items.len - 1];
+            ctx.deinit(self.allocator);
+            self.function_stack.items.len = ctx_index;
+        }
+
+        {
+            var ctx = &self.function_stack.items[self.function_stack.items.len - 1];
+            for (params.items) |param_name| {
+                try ctx.addPendingParam(self.allocator, param_name);
+            }
+        }
 
         var body_result: u16 = 0;
         if (self.peek() == '{') {
@@ -3134,15 +3732,18 @@ pub const Parser = struct {
             if (!self.matchKeyword("end")) return error.ParseError;
         }
 
-    const default_reg: u16 = if (body_result != 0) body_result else 0;
-    const nil_const_idx: u16 = 0;
-    try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ default_reg, nil_const_idx, 0 } });
-    try instructions.append(self.allocator, .{ .opcode = .return_value, .operands = [_]u16{ default_reg, 0, 0 } });
+        const default_reg: u16 = if (body_result != 0) body_result else 0;
+        const nil_const_idx: u16 = 0;
+        try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ default_reg, nil_const_idx, 0 } });
+        try instructions.append(self.allocator, .{ .opcode = .return_value, .operands = [_]u16{ default_reg, 0, 0 } });
 
-    const body_end_idx = instructions.items.len;
+        const body_end_idx = instructions.items.len;
 
-    instructions.items[jump_over_idx].operands[0] = @as(u16, @intCast(body_end_idx));
+        instructions.items[jump_over_idx].operands[0] = @as(u16, @intCast(body_end_idx));
 
+        var fn_ctx = &self.function_stack.items[self.function_stack.items.len - 1];
+        const capture_names = try fn_ctx.takeCaptureNames(self.allocator);
+        fn_ctx.deinit(self.allocator);
         self.function_stack.items.len = ctx_index;
 
         const owned_params = try params.toOwnedSlice(self.allocator);
@@ -3153,8 +3754,14 @@ pub const Parser = struct {
             }
             self.allocator.free(owned_params);
         }
+        defer {
+            for (capture_names) |name| {
+                self.allocator.free(name);
+            }
+            self.allocator.free(capture_names);
+        }
 
-        const script_func = try ScriptFunction.init(self.allocator, body_start_idx, body_end_idx, owned_params);
+        const script_func = try ScriptFunction.init(self.allocator, body_start_idx, body_end_idx, owned_params, capture_names);
         errdefer script_func.release();
         const func_const_idx = @as(u16, @intCast(constants.items.len));
         try constants.append(self.allocator, .{ .script_function = script_func });
@@ -3219,6 +3826,8 @@ pub const Parser = struct {
             const nil_const_idx: u16 = 0;
             try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ result_reg, nil_const_idx, 0 } });
         }
+
+        try self.registerLocalCopy(name);
 
         const name_idx = @as(u16, @intCast(constants.items.len));
         try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, name) });
@@ -3491,6 +4100,7 @@ pub const Parser = struct {
                 try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ reg, const_idx, 0 } });
                 return .{ .result_reg = reg, .next_reg = reg + 1 };
             } else {
+                try self.noteIdentifierUsage(ident);
                 const name_idx = @as(u16, @intCast(constants.items.len));
                 try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, ident) });
                 try instructions.append(self.allocator, .{ .opcode = .load_global, .operands = [_]u16{ reg, name_idx, 0 } });
