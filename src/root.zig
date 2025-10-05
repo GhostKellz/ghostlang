@@ -1336,6 +1336,7 @@ pub const Opcode = enum(u8) {
 pub const Instruction = struct {
     opcode: Opcode,
     operands: [3]u16, // for simplicity, up to 3 operands
+    extra: u16 = 0,
 };
 
 pub const SyntaxNodeKind = enum {
@@ -1646,7 +1647,8 @@ const ScopeFrame = struct {
 
 const CallFrame = struct {
     return_pc: usize,
-    return_reg: u16,
+    return_base: u16,
+    expected_results: u16,
     scope_depth: usize,
 };
 
@@ -1663,6 +1665,7 @@ pub const VM = struct {
     start_time: i64,
     instruction_count: usize,
     instrumentation: ?Instrumentation,
+    last_result_count: u16,
 
     pub fn init(allocator: std.mem.Allocator, code: []const Instruction, constants: []ScriptValue, engine: *ScriptEngine) VM {
         var vm = VM{
@@ -1678,6 +1681,7 @@ pub const VM = struct {
             .start_time = 0,
             .instruction_count = 0,
             .instrumentation = engine.config.instrumentation,
+            .last_result_count = 1,
         };
 
         var idx: usize = 0;
@@ -1905,6 +1909,7 @@ pub const VM = struct {
                     if (has_value) {
                         value_value.deinit(self.allocator);
                     }
+                    self.last_result_count = @as(u16, @intCast(count));
                 },
                 .add => {
                     const dest = instr.operands[0];
@@ -2109,21 +2114,54 @@ pub const VM = struct {
                     if (self.call_stack.items.len == 0) {
                         return ExecutionError.ScopeUnderflow;
                     }
+
                     const frame_idx = self.call_stack.items.len - 1;
                     const frame = self.call_stack.items[frame_idx];
                     const source_reg = instr.operands[0];
-                    const source_idx = operandIndex(source_reg);
-                    const result_value = try self.copyValue(self.registers[source_idx]);
+                    const fixed_count = instr.operands[1];
+                    const variadic_flag = instr.operands[2] == 1;
+
+                    var actual_count: u16 = fixed_count;
+                    if (variadic_flag) {
+                        actual_count +%= self.last_result_count;
+                    }
+
                     while (self.scopes.items.len > frame.scope_depth) {
                         try self.popScope();
                     }
-                    self.call_stack.items.len = frame_idx;
-                    self.setRegister(frame.return_reg, result_value);
-                    if (frame.return_reg != source_reg) {
-                        self.registers[source_idx].deinit(self.allocator);
-                        self.registers[source_idx] = .{ .nil = {} };
+
+                    const dest_base = frame.return_base;
+                    const expected = frame.expected_results;
+                    const dest_count: u16 = if (expected == 0) actual_count else expected;
+
+                    var idx: u16 = 0;
+                    while (idx < dest_count) : (idx += 1) {
+                        const dest_reg = dest_base + idx;
+                        if (idx < actual_count) {
+                            const src_idx = operandIndex(source_reg + idx);
+                            const copy = try self.copyValue(self.registers[src_idx]);
+                            self.setRegister(dest_reg, copy);
+                        } else {
+                            self.setRegister(dest_reg, .{ .nil = {} });
+                        }
                     }
+
+                    var cleanup_idx: u16 = 0;
+                    while (cleanup_idx < actual_count) : (cleanup_idx += 1) {
+                        const src_reg = source_reg + cleanup_idx;
+                        const src_idx = operandIndex(src_reg);
+                        const dest_reg = dest_base + cleanup_idx;
+                        if (cleanup_idx < dest_count and dest_reg == src_reg) {
+                            // already handled by setRegister
+                            continue;
+                        }
+                        self.registers[src_idx].deinit(self.allocator);
+                        self.registers[src_idx] = .{ .nil = {} };
+                    }
+
+                    self.call_stack.items.len = frame_idx;
                     self.pc = frame.return_pc;
+                    self.last_result_count = actual_count;
                     continue;
                 },
                 .call => {
@@ -2134,16 +2172,24 @@ pub const VM = struct {
                     const arg_len: usize = @intCast(arg_count);
                     const func_name_index: usize = @intCast(func_name_idx);
                     const func_name = self.constants[func_name_index];
+                    const expected_results = instr.extra;
                     if (func_name == .string) {
                         if (self.getVariable(func_name.string)) |value| {
                             switch (value) {
                                 .function => |callable| {
                                     const args = self.registers[start_index .. start_index + arg_len];
                                     const result = callable(args);
-                                    self.setRegister(arg_start, result);
+                                    const dest_base = arg_start;
+                                    const dest_expected: u16 = if (expected_results == 0) 1 else expected_results;
+                                    self.setRegister(dest_base, result);
+                                    var fill: u16 = 1;
+                                    while (fill < dest_expected) : (fill += 1) {
+                                        self.setRegister(dest_base + fill, .{ .nil = {} });
+                                    }
+                                    self.last_result_count = dest_expected;
                                 },
                                 .script_function => |script_func| {
-                                    try self.invokeScriptFunction(script_func, arg_start, arg_start, arg_count);
+                                    try self.invokeScriptFunction(script_func, arg_start, arg_start, arg_count, expected_results);
                                     continue;
                                 },
                                 else => return ExecutionError.NotAFunction,
@@ -2163,14 +2209,22 @@ pub const VM = struct {
                     const arg_len: usize = @intCast(arg_count);
                     const func_idx = operandIndex(func_reg);
                     const func_value = self.registers[func_idx];
+                    const expected_results = instr.extra;
                     switch (func_value) {
                         .function => |callable| {
                             const args = self.registers[start_index .. start_index + arg_len];
                             const result = callable(args);
-                            self.setRegister(func_reg, result);
+                            const dest_base = func_reg;
+                            const dest_expected: u16 = if (expected_results == 0) 1 else expected_results;
+                            self.setRegister(dest_base, result);
+                            var fill: u16 = 1;
+                            while (fill < dest_expected) : (fill += 1) {
+                                self.setRegister(dest_base + fill, .{ .nil = {} });
+                            }
+                            self.last_result_count = dest_expected;
                         },
                         .script_function => |script_func| {
-                            try self.invokeScriptFunction(script_func, func_reg, arg_start, arg_count);
+                            try self.invokeScriptFunction(script_func, func_reg, arg_start, arg_count, expected_results);
                             continue;
                         },
                         else => return ExecutionError.NotAFunction,
@@ -2337,7 +2391,7 @@ pub const VM = struct {
         try self.declareVariable(name, value);
     }
 
-    fn invokeScriptFunction(self: *VM, func: *ScriptFunction, result_reg: u16, arg_start: u16, arg_count: u16) ExecutionError!void {
+    fn invokeScriptFunction(self: *VM, func: *ScriptFunction, result_reg: u16, arg_start: u16, arg_count: u16, expected_results: u16) ExecutionError!void {
         const expected_args: u16 = @intCast(func.param_names.len);
         if (expected_args != arg_count) {
             return ExecutionError.TypeError;
@@ -2347,7 +2401,8 @@ pub const VM = struct {
         const frame_idx = self.call_stack.items.len;
         try self.call_stack.append(self.allocator, .{
             .return_pc = self.pc + 1,
-            .return_reg = result_reg,
+            .return_base = result_reg,
+            .expected_results = expected_results,
             .scope_depth = base_scope_depth,
         });
         errdefer self.call_stack.items.len = frame_idx;
@@ -3212,7 +3267,26 @@ pub const Parser = struct {
         result_reg: u16,
         next_reg: u16,
         self_reg: ?u16 = null,
+        value_count: u16 = 1,
+        call_instr_index: ?usize = null,
     };
+
+    fn configureCallResultCount(
+        self: *Parser,
+        instructions: *std.ArrayListUnmanaged(Instruction),
+        result: *ParseResult,
+        desired: u16,
+    ) void {
+        _ = self;
+        if (result.call_instr_index) |idx| {
+            instructions.items[idx].extra = desired;
+            result.value_count = if (desired == 0) 1 else desired;
+            const min_next = if (desired == 0) result.result_reg + 1 else result.result_reg + desired;
+            if (result.next_reg < min_next) {
+                result.next_reg = min_next;
+            }
+        }
+    }
 
     fn appendBeginScope(self: *Parser, instructions: *std.ArrayListUnmanaged(Instruction)) !void {
         try instructions.append(self.allocator, .{ .opcode = .begin_scope, .operands = [_]u16{ 0, 0, 0 } });
@@ -3432,17 +3506,7 @@ pub const Parser = struct {
                 return try self.parseLocalDeclaration(constants, instructions);
             } else if (std.mem.eql(u8, ident, "var")) {
                 self.skipWhitespace();
-                const var_name = try self.parseIdent();
-                defer self.allocator.free(var_name);
-                self.skipWhitespace();
-                try self.registerLocalCopy(var_name);
-                try self.expect('=');
-                self.skipWhitespace();
-                const expr = try self.parseExpression(constants, instructions, 0);
-                const name_idx = @as(u16, @intCast(constants.items.len));
-                try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, var_name) });
-                try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ expr.result_reg, name_idx, 1 } });
-                return expr.result_reg;
+                return try self.parseDeclaration(constants, instructions, 1);
             } else if (std.mem.eql(u8, ident, "break")) {
                 return try self.recordBreak(instructions);
             } else if (std.mem.eql(u8, ident, "continue")) {
@@ -4027,7 +4091,7 @@ pub const Parser = struct {
         const default_reg: u16 = if (body_result != 0) body_result else 0;
         const nil_const_idx: u16 = 0;
         try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ default_reg, nil_const_idx, 0 } });
-        try instructions.append(self.allocator, .{ .opcode = .return_value, .operands = [_]u16{ default_reg, 0, 0 } });
+    try instructions.append(self.allocator, .{ .opcode = .return_value, .operands = [_]u16{ default_reg, 1, 0 } });
 
         const body_end_idx = instructions.items.len;
 
@@ -4084,12 +4148,59 @@ pub const Parser = struct {
         }
 
         var result_reg: u16 = 0;
+        var fixed_count: u16 = 0;
+        var has_variadic = false;
         if (has_expression) {
-            const expr = try self.parseExpression(constants, instructions, 0);
-            result_reg = expr.result_reg;
+            const base_reg: u16 = 0;
+            var values = std.ArrayListUnmanaged(struct {
+                result: ParseResult,
+                is_variadic: bool,
+            }){};
+            defer values.deinit(self.allocator);
+
+            while (true) {
+                const target_reg = base_reg + @as(u16, @intCast(values.items.len));
+                var expr = try self.parseExpression(constants, instructions, target_reg);
+                if (expr.result_reg != target_reg) {
+                    try instructions.append(self.allocator, .{ .opcode = .move, .operands = [_]u16{ target_reg, expr.result_reg, 0 } });
+                    expr.result_reg = target_reg;
+                }
+                if (expr.next_reg < target_reg + expr.value_count) {
+                    expr.next_reg = target_reg + expr.value_count;
+                }
+                try values.append(self.allocator, .{ .result = expr, .is_variadic = false });
+
+                self.skipWhitespace();
+                if (self.peek() == ',') {
+                    self.advance();
+                    self.skipWhitespace();
+                    continue;
+                }
+                break;
+            }
+
+            result_reg = values.items[0].result.result_reg;
+
+            const last_index = values.items.len - 1;
+            var idx: usize = 0;
+            while (idx < values.items.len) : (idx += 1) {
+                var entry = &values.items[idx];
+                const is_last = idx == last_index;
+                if (is_last and entry.result.call_instr_index != null) {
+                    self.configureCallResultCount(instructions, &entry.result, 0);
+                    entry.is_variadic = true;
+                    has_variadic = true;
+                } else {
+                    if (entry.result.call_instr_index != null) {
+                        self.configureCallResultCount(instructions, &entry.result, 1);
+                    }
+                    fixed_count += entry.result.value_count;
+                }
+            }
         } else {
             const nil_const_idx: u16 = 0;
             try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ result_reg, nil_const_idx, 0 } });
+            fixed_count = 1;
         }
 
         const ctx = self.function_stack.items[self.function_stack.items.len - 1];
@@ -4098,32 +4209,123 @@ pub const Parser = struct {
             try self.emitScopeUnwind(instructions, unwind);
         }
 
-        try instructions.append(self.allocator, .{ .opcode = .return_value, .operands = [_]u16{ result_reg, 0, 0 } });
+        const variadic_flag: u16 = if (has_variadic) 1 else 0;
+        try instructions.append(self.allocator, .{ .opcode = .return_value, .operands = [_]u16{ result_reg, fixed_count, variadic_flag } });
         return result_reg;
     }
 
     fn parseLocalDeclaration(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction)) anyerror!u16 {
-        const name = try self.parseIdent();
-        defer self.allocator.free(name);
+        return try self.parseDeclaration(constants, instructions, 2);
+    }
+
+    fn parseDeclaration(
+        self: *Parser,
+        constants: *std.ArrayListUnmanaged(ScriptValue),
+        instructions: *std.ArrayListUnmanaged(Instruction),
+        storage_mode: u16,
+    ) anyerror!u16 {
+        var names = std.ArrayListUnmanaged([]const u8){};
+        defer {
+            for (names.items) |name| {
+                self.allocator.free(name);
+            }
+            names.deinit(self.allocator);
+        }
+
+        while (true) {
+            const identifier = try self.parseIdent();
+            try names.append(self.allocator, identifier);
+            self.skipWhitespace();
+            if (self.peek() == ',') {
+                self.advance();
+                self.skipWhitespace();
+                continue;
+            }
+            break;
+        }
+
+        if (names.items.len == 0) return error.ParseError;
 
         self.skipWhitespace();
 
-        var result_reg: u16 = 0;
+        var expr_values = std.ArrayListUnmanaged(ParseResult){};
+        defer expr_values.deinit(self.allocator);
+
         if (self.peek() == '=') {
             self.advance();
             self.skipWhitespace();
-            const expr = try self.parseExpression(constants, instructions, 0);
-            result_reg = expr.result_reg;
-        } else {
-            const nil_const_idx: u16 = 0;
-            try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ result_reg, nil_const_idx, 0 } });
+
+            while (true) {
+                const target_reg = @as(u16, @intCast(expr_values.items.len));
+                var expr = try self.parseExpression(constants, instructions, target_reg);
+                if (expr.result_reg != target_reg) {
+                    try instructions.append(self.allocator, .{ .opcode = .move, .operands = [_]u16{ target_reg, expr.result_reg, 0 } });
+                    expr.result_reg = target_reg;
+                }
+                if (expr.next_reg < target_reg + expr.value_count) {
+                    expr.next_reg = target_reg + expr.value_count;
+                }
+                try expr_values.append(self.allocator, expr);
+
+                self.skipWhitespace();
+                if (self.peek() == ',') {
+                    self.advance();
+                    self.skipWhitespace();
+                    continue;
+                }
+                break;
+            }
         }
 
-        try self.registerLocalCopy(name);
+        for (names.items) |name| {
+            try self.registerLocalCopy(name);
+        }
 
-        const name_idx = @as(u16, @intCast(constants.items.len));
-        try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, name) });
-        try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ result_reg, name_idx, 2 } });
+        const nil_const_idx: u16 = 0;
+        var assigned: usize = 0;
+        var expr_idx: usize = 0;
+        var result_reg: u16 = 0;
+
+        while (assigned < names.items.len and expr_idx < expr_values.items.len) : (expr_idx += 1) {
+            const expr_ptr = &expr_values.items[expr_idx];
+            const remaining = names.items.len - assigned;
+            const is_last = expr_idx + 1 == expr_values.items.len;
+
+            var produced: u16 = expr_ptr.value_count;
+            if (expr_ptr.call_instr_index != null) {
+                if (is_last and remaining > 1) {
+                    const desired: u16 = @intCast(remaining);
+                    self.configureCallResultCount(instructions, expr_ptr, desired);
+                    produced = desired;
+                } else {
+                    self.configureCallResultCount(instructions, expr_ptr, 1);
+                    produced = 1;
+                }
+            }
+
+            var offset: u16 = 0;
+            while (offset < produced and assigned < names.items.len) : (offset += 1) {
+                const value_reg = expr_ptr.result_reg + offset;
+                const name = names.items[assigned];
+                const name_idx = @as(u16, @intCast(constants.items.len));
+                try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, name) });
+                try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ value_reg, name_idx, storage_mode } });
+                result_reg = value_reg;
+                assigned += 1;
+            }
+        }
+
+        while (assigned < names.items.len) {
+            const target_reg = @as(u16, @intCast(assigned));
+            try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ target_reg, nil_const_idx, 0 } });
+            const name = names.items[assigned];
+            const name_idx = @as(u16, @intCast(constants.items.len));
+            try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, name) });
+            try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ target_reg, name_idx, storage_mode } });
+            result_reg = target_reg;
+            assigned += 1;
+        }
+
         return result_reg;
     }
 
@@ -4483,9 +4685,18 @@ pub const Parser = struct {
 
         try self.expect(')');
 
-        try instructions.append(self.allocator, .{ .opcode = .call_value, .operands = [_]u16{ base.result_reg, args_start, arg_count } });
+        const call_idx = instructions.items.len;
+        try instructions.append(self.allocator, .{ .opcode = .call_value, .operands = [_]u16{ base.result_reg, args_start, arg_count }, .extra = 1 });
 
-        return .{ .result_reg = base.result_reg, .next_reg = next_reg, .self_reg = null };
+        const ensured_next = if (next_reg <= base.result_reg) base.result_reg + 1 else next_reg;
+
+        return .{
+            .result_reg = base.result_reg,
+            .next_reg = ensured_next,
+            .self_reg = null,
+            .value_count = 1,
+            .call_instr_index = call_idx,
+        };
     }
 
     fn parseTableLiteral(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction), reg: u16) anyerror!ParseResult {
@@ -5257,6 +5468,59 @@ test "script return without expression yields nil" {
 
     const result = try script.run();
     try std.testing.expect(result == .nil);
+}
+
+test "script destructures multi return values" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\function pair()
+        \\    return 1, 2
+        \\end
+        \\local first, second = pair()
+        \\first * 10 + second
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 12), result.number);
+}
+
+test "script forwards multi return values" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\function inner()
+        \\    return 4, 6
+        \\end
+        \\function outer()
+        \\    return inner()
+        \\end
+        \\local a, b, c = outer()
+        \\var sum = 0
+        \\if c == nil then
+        \\    sum = a + b
+        \\else
+        \\    sum = 0
+        \\end
+        \\sum
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 10), result.number);
 }
 
 test "script function arity mismatch errors" {
