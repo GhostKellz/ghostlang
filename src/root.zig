@@ -82,6 +82,36 @@ pub const MemoryLimitAllocator = struct {
     }
 };
 
+pub const ExecutionError = error{
+    MemoryLimitExceeded,
+    ExecutionTimeout,
+    IONotAllowed,
+    SyscallNotAllowed,
+    SecurityViolation,
+    ParseError,
+    TypeError,
+    FunctionNotFound,
+    NotAFunction,
+    UndefinedVariable,
+    ScopeUnderflow,
+    InvalidFunctionName,
+    InvalidGlobalName,
+    GlobalNotFound,
+    UnsupportedArgumentType,
+    OutOfMemory,
+    ScriptError,
+};
+
+const NativeCallResult = struct {
+    last_result_count: u16,
+    advance_pc: bool = true,
+};
+
+const NativeFunction = struct {
+    context: ?*anyopaque = null,
+    call: *const fn (context: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, arg_start: u16, arg_count: u16, expected_results: u16) ExecutionError!NativeCallResult,
+};
+
 const ScriptFunction = struct {
     allocator: std.mem.Allocator,
     start_pc: usize,
@@ -319,6 +349,7 @@ pub const ScriptValueType = enum {
     number,
     string,
     function,
+    native_function,
     script_function,
     table,
     array,
@@ -332,6 +363,7 @@ pub const ScriptValue = union(ScriptValueType) {
     number: f64,
     string: []const u8,
     function: *const fn (args: []const ScriptValue) ScriptValue,
+    native_function: NativeFunction,
     script_function: *ScriptFunction,
     table: *ScriptTable,
     array: *ScriptArray,
@@ -654,25 +686,6 @@ pub const EngineConfig = struct {
     allow_syscalls: bool = false,
     deterministic: bool = false, // Disable time-based functions, random, etc.
     instrumentation: ?Instrumentation = null,
-};
-
-pub const ExecutionError = error{
-    MemoryLimitExceeded,
-    ExecutionTimeout,
-    IONotAllowed,
-    SyscallNotAllowed,
-    SecurityViolation,
-    ParseError,
-    TypeError,
-    FunctionNotFound,
-    NotAFunction,
-    UndefinedVariable,
-    ScopeUnderflow,
-    InvalidFunctionName,
-    InvalidGlobalName,
-    GlobalNotFound,
-    UnsupportedArgumentType,
-    OutOfMemory,
 };
 
 pub const SecurityContext = struct {
@@ -1189,15 +1202,15 @@ pub const ScriptEngine = struct {
     pub fn registerEditorHelpers(self: *ScriptEngine) ExecutionError!void {
         editor_helper_allocator = self.tracked_allocator;
         try self.registerFunction("createArray", createArrayFunction);
-    try self.registerFunction("arrayPush", arrayPushFunction);
-    try self.registerFunction("arraySet", arraySetFunction);
-    try self.registerFunction("arrayPop", arrayPopFunction);
-    try self.registerFunction("arrayLength", arrayLengthFunction);
-    try self.registerFunction("arrayGet", arrayGetFunction);
+        try self.registerFunction("arrayPush", arrayPushFunction);
+        try self.registerFunction("arraySet", arraySetFunction);
+        try self.registerFunction("arrayPop", arrayPopFunction);
+        try self.registerFunction("arrayLength", arrayLengthFunction);
+        try self.registerFunction("arrayGet", arrayGetFunction);
         try self.registerFunction("createObject", createObjectFunction);
         try self.registerFunction("objectSet", objectSetFunction);
         try self.registerFunction("objectGet", objectGetFunction);
-    try self.registerFunction("objectKeys", objectKeysFunction);
+        try self.registerFunction("objectKeys", objectKeysFunction);
         try self.registerFunction("split", splitFunction);
         try self.registerFunction("join", joinFunction);
         try self.registerFunction("substring", substringFunction);
@@ -1605,12 +1618,14 @@ pub const Opcode = enum(u8) {
     new_array,
     table_set_field,
     table_get_field,
+    resolve_method,
     table_set_index,
     table_get_index,
     array_append,
     iterator_init,
     iterator_next,
     iterator_unpack,
+    vararg_collect,
     add,
     sub,
     mul,
@@ -1952,6 +1967,18 @@ const CallFrame = struct {
     return_base: u16,
     expected_results: u16,
     scope_depth: usize,
+    varargs: []ScriptValue,
+    owns_varargs: bool,
+    protected_index: ?usize,
+};
+
+const ProtectedCall = struct {
+    dest_reg: u16,
+    expected_results: u16,
+    result_base: u16,
+    scope_depth: usize,
+    call_frame_index: usize,
+    arg_count: u16,
 };
 
 pub const VM = struct {
@@ -1959,6 +1986,7 @@ pub const VM = struct {
     globals: std.StringHashMap(ScriptValue),
     scopes: std.ArrayListUnmanaged(ScopeFrame),
     call_stack: std.ArrayListUnmanaged(CallFrame),
+    protected_calls: std.ArrayListUnmanaged(ProtectedCall),
     pc: usize,
     code: []const Instruction,
     constants: []ScriptValue,
@@ -1975,6 +2003,7 @@ pub const VM = struct {
             .globals = std.StringHashMap(ScriptValue).init(allocator),
             .scopes = .{},
             .call_stack = .{},
+            .protected_calls = .{},
             .pc = 0,
             .code = code,
             .constants = constants,
@@ -2013,7 +2042,11 @@ pub const VM = struct {
             frame.deinit(self.allocator);
         }
         self.scopes.deinit(self.allocator);
+        for (self.call_stack.items) |frame| {
+            self.cleanupVarargs(frame);
+        }
         self.call_stack.deinit(self.allocator);
+        self.protected_calls.deinit(self.allocator);
     }
 
     fn setRegister(self: *VM, reg: u16, value: ScriptValue) void {
@@ -2122,6 +2155,36 @@ pub const VM = struct {
                         self.setRegister(dest_reg, .{ .nil = {} });
                     }
                 },
+                .resolve_method => {
+                    const dest_reg = instr.operands[0];
+                    const object_reg = instr.operands[1];
+                    const key_const_idx = instr.operands[2];
+                    const object_idx = operandIndex(object_reg);
+                    const object_value = self.registers[object_idx];
+                    const key_idx = operandIndex(key_const_idx);
+                    const key_const = self.constants[key_idx];
+                    if (key_const != .string) return ExecutionError.InvalidFunctionName;
+
+                    var resolved: ?ScriptValue = null;
+
+                    switch (object_value) {
+                        .table => |table_ptr| {
+                            resolved = try self.tableGetField(table_ptr, key_const.string);
+                        },
+                        else => {},
+                    }
+
+                    if (resolved) |value| {
+                        self.setRegister(dest_reg, value);
+                    } else {
+                        if (self.getVariable(key_const.string)) |value| {
+                            const copy = try self.copyResolvedValue(value);
+                            self.setRegister(dest_reg, copy);
+                        } else {
+                            self.setRegister(dest_reg, .{ .nil = {} });
+                        }
+                    }
+                },
                 .table_set_index => {
                     const table_reg = instr.operands[0];
                     const index_reg = instr.operands[1];
@@ -2216,6 +2279,40 @@ pub const VM = struct {
                         value_value.deinit(self.allocator);
                     }
                     self.last_result_count = @as(u16, @intCast(count));
+                },
+                .vararg_collect => {
+                    if (self.call_stack.items.len == 0) {
+                        return ExecutionError.ScopeUnderflow;
+                    }
+
+                    const frame = self.call_stack.items[self.call_stack.items.len - 1];
+                    const dest_reg = instr.operands[0];
+                    const expected = instr.extra;
+                    const available: usize = frame.varargs.len;
+                    const copy_count: usize = if (expected == 0)
+                        available
+                    else
+                        @min(@as(usize, expected), available);
+
+                    var idx: usize = 0;
+                    while (idx < copy_count) : (idx += 1) {
+                        const copy = try self.copyValue(frame.varargs[idx]);
+                        const target_reg = dest_reg + @as(u16, @intCast(idx));
+                        self.setRegister(target_reg, copy);
+                    }
+
+                    if (expected == 0) {
+                        if (copy_count == 0) {
+                            self.setRegister(dest_reg, .{ .nil = {} });
+                        }
+                        self.last_result_count = @intCast(copy_count);
+                    } else {
+                        while (idx < expected) : (idx += 1) {
+                            const target_reg = dest_reg + @as(u16, @intCast(idx));
+                            self.setRegister(target_reg, .{ .nil = {} });
+                        }
+                        self.last_result_count = expected;
+                    }
                 },
                 .add => {
                     const dest = instr.operands[0];
@@ -2466,6 +2563,13 @@ pub const VM = struct {
                     }
 
                     self.call_stack.items.len = frame_idx;
+                    self.cleanupVarargs(frame);
+                    if (frame.protected_index) |pidx| {
+                        const final_count = try self.finalizeProtectedSuccess(pidx, actual_count);
+                        self.pc = frame.return_pc;
+                        self.last_result_count = final_count;
+                        continue;
+                    }
                     self.pc = frame.return_pc;
                     self.last_result_count = actual_count;
                     continue;
@@ -2494,8 +2598,13 @@ pub const VM = struct {
                                     }
                                     self.last_result_count = dest_expected;
                                 },
+                                .native_function => |native| {
+                                    const outcome = try self.invokeNativeFunction(native, arg_start, arg_start, arg_count, expected_results);
+                                    self.last_result_count = outcome.last_result_count;
+                                    if (!outcome.advance_pc) continue;
+                                },
                                 .script_function => |script_func| {
-                                    try self.invokeScriptFunction(script_func, arg_start, arg_start, arg_count, expected_results);
+                                    try self.invokeScriptFunction(script_func, arg_start, arg_start, arg_count, expected_results, null);
                                     continue;
                                 },
                                 else => return ExecutionError.NotAFunction,
@@ -2529,8 +2638,13 @@ pub const VM = struct {
                             }
                             self.last_result_count = dest_expected;
                         },
+                        .native_function => |native| {
+                            const outcome = try self.invokeNativeFunction(native, func_reg, arg_start, arg_count, expected_results);
+                            self.last_result_count = outcome.last_result_count;
+                            if (!outcome.advance_pc) continue;
+                        },
                         .script_function => |script_func| {
-                            try self.invokeScriptFunction(script_func, func_reg, arg_start, arg_count, expected_results);
+                            try self.invokeScriptFunction(script_func, func_reg, arg_start, arg_count, expected_results, null);
                             continue;
                         },
                         else => return ExecutionError.NotAFunction,
@@ -2697,10 +2811,53 @@ pub const VM = struct {
         try self.declareVariable(name, value);
     }
 
-    fn invokeScriptFunction(self: *VM, func: *ScriptFunction, result_reg: u16, arg_start: u16, arg_count: u16, expected_results: u16) ExecutionError!void {
-        const expected_args: u16 = @intCast(func.param_names.len);
-        if (expected_args != arg_count) {
+    fn invokeNativeFunction(self: *VM, native: NativeFunction, dest_reg: u16, arg_start: u16, arg_count: u16, expected_results: u16) ExecutionError!NativeCallResult {
+        const vm_ptr: *anyopaque = @ptrCast(self);
+        return native.call(native.context, vm_ptr, dest_reg, arg_start, arg_count, expected_results);
+    }
+
+    fn invokeScriptFunction(
+        self: *VM,
+        func: *ScriptFunction,
+        result_reg: u16,
+        arg_start: u16,
+        arg_count: u16,
+        expected_results: u16,
+        protected_index: ?usize,
+    ) ExecutionError!void {
+        const named_count: u16 = @intCast(func.param_names.len);
+        const provided: u16 = arg_count;
+
+        if (provided < named_count) {
             return ExecutionError.TypeError;
+        }
+
+        const extra_args: usize = if (provided > named_count) @intCast(provided - named_count) else 0;
+        if (!func.is_vararg and extra_args > 0) {
+            return ExecutionError.TypeError;
+        }
+
+        const empty_varargs = [_]ScriptValue{};
+        var varargs_slice: []ScriptValue = empty_varargs[0..];
+        var frame_owns_varargs = false;
+        var varargs_allocated = false;
+        var copied: usize = 0;
+        if (func.is_vararg and extra_args > 0) {
+            varargs_slice = try self.allocator.alloc(ScriptValue, extra_args);
+            frame_owns_varargs = true;
+            varargs_allocated = true;
+            errdefer {
+                if (varargs_allocated) {
+                    while (copied > 0) : (copied -= 1) {
+                        varargs_slice[copied - 1].deinit(self.allocator);
+                    }
+                    self.allocator.free(varargs_slice);
+                }
+            }
+            while (copied < extra_args) : (copied += 1) {
+                const reg_index = operandIndex(arg_start) + named_count + copied;
+                varargs_slice[copied] = try self.copyValue(self.registers[reg_index]);
+            }
         }
 
         const base_scope_depth = self.scopes.items.len;
@@ -2710,17 +2867,43 @@ pub const VM = struct {
             .return_base = result_reg,
             .expected_results = expected_results,
             .scope_depth = base_scope_depth,
+            .varargs = varargs_slice,
+            .owns_varargs = frame_owns_varargs,
+            .protected_index = protected_index,
         });
-        errdefer self.call_stack.items.len = frame_idx;
+        varargs_allocated = false;
+        errdefer {
+            if (self.call_stack.items.len > frame_idx) {
+                const frame = self.call_stack.items[self.call_stack.items.len - 1];
+                self.cleanupVarargs(frame);
+                self.call_stack.items.len = frame_idx;
+            } else if (frame_owns_varargs) {
+                const tmp_frame = CallFrame{
+                    .return_pc = 0,
+                    .return_base = 0,
+                    .expected_results = 0,
+                    .scope_depth = 0,
+                    .varargs = varargs_slice,
+                    .owns_varargs = true,
+                    .protected_index = protected_index,
+                };
+                self.cleanupVarargs(tmp_frame);
+            }
+        }
 
         try self.pushScope();
 
         var idx: usize = 0;
+        const base_reg_index = operandIndex(arg_start);
         while (idx < func.param_names.len) : (idx += 1) {
             const param_name = func.param_names[idx];
-            const reg_index = operandIndex(arg_start) + idx;
-            const arg_value = self.registers[reg_index];
-            try self.declareVariable(param_name, arg_value);
+            if (idx < provided) {
+                const reg_index = base_reg_index + idx;
+                const arg_value = self.registers[reg_index];
+                try self.declareVariable(param_name, arg_value);
+            } else {
+                try self.declareVariable(param_name, .{ .nil = {} });
+            }
         }
 
         var cap_it = func.captures.iterator();
@@ -2729,6 +2912,185 @@ pub const VM = struct {
         }
 
         self.pc = func.start_pc;
+    }
+
+    fn finalizeProtectedSuccess(self: *VM, context_index: usize, actual_count: u16) ExecutionError!u16 {
+        if (context_index >= self.protected_calls.items.len) {
+            return ExecutionError.ScopeUnderflow;
+        }
+        const context = self.protected_calls.items[context_index];
+        const dest_reg = context.dest_reg;
+        const dest_expected = context.expected_results;
+        const source_base = context.result_base;
+
+        var desired_count: usize = if (dest_expected == 0)
+            @as(usize, 1) + actual_count
+        else
+            dest_expected;
+
+        if (desired_count == 0) {
+            desired_count = 1;
+        }
+
+        const available_registers = self.registers.len - operandIndex(dest_reg);
+        if (desired_count > available_registers) {
+            desired_count = available_registers;
+        }
+
+        self.setRegister(dest_reg, .{ .boolean = true });
+        var idx: usize = 1;
+        while (idx < desired_count) : (idx += 1) {
+            const src_offset = idx - 1;
+            const dest_slot: u16 = dest_reg + @as(u16, @intCast(idx));
+            if (src_offset < actual_count) {
+                const src_reg: u16 = source_base + @as(u16, @intCast(src_offset));
+                const copy = try self.copyValue(self.registers[operandIndex(src_reg)]);
+                self.setRegister(dest_slot, copy);
+            } else {
+                self.setRegister(dest_slot, .{ .nil = {} });
+            }
+        }
+
+        var cleanup: usize = 0;
+        while (cleanup < actual_count) : (cleanup += 1) {
+            const src_reg: u16 = source_base + @as(u16, @intCast(cleanup));
+            const idx_reg = operandIndex(src_reg);
+            self.registers[idx_reg].deinit(self.allocator);
+            self.registers[idx_reg] = .{ .nil = {} };
+        }
+
+        var leftover: usize = actual_count;
+        while (leftover <= context.arg_count) : (leftover += 1) {
+            const reg = source_base + @as(u16, @intCast(leftover));
+            const reg_idx = operandIndex(reg);
+            self.registers[reg_idx].deinit(self.allocator);
+            self.registers[reg_idx] = .{ .nil = {} };
+        }
+
+        self.protected_calls.items.len = context_index;
+        return @intCast(desired_count);
+    }
+
+    fn finalizeProtectedFailure(self: *VM, context: ProtectedCall, message: ScriptValue) ExecutionError!u16 {
+        const dest_reg = context.dest_reg;
+        const dest_expected = context.expected_results;
+
+        var desired_count: usize = if (dest_expected == 0) 2 else dest_expected;
+        if (desired_count == 0) desired_count = 1;
+
+        const available_registers = self.registers.len - operandIndex(dest_reg);
+        if (desired_count > available_registers) {
+            desired_count = available_registers;
+        }
+
+        self.setRegister(dest_reg, .{ .boolean = false });
+
+        var message_consumed = false;
+        if (desired_count >= 2) {
+            const copy = try self.copyValue(message);
+            self.setRegister(dest_reg + 1, copy);
+            message_consumed = true;
+
+            var tmp = message;
+            tmp.deinit(self.allocator);
+
+            var idx: usize = 2;
+            while (idx < desired_count) : (idx += 1) {
+                self.setRegister(dest_reg + @as(u16, @intCast(idx)), .{ .nil = {} });
+            }
+        }
+
+        if (!message_consumed) {
+            var tmp = message;
+            tmp.deinit(self.allocator);
+        }
+
+        var cleanup: u16 = 0;
+        while (cleanup <= context.arg_count) : (cleanup += 1) {
+            const reg = context.result_base + cleanup;
+            const idx = operandIndex(reg);
+            self.registers[idx].deinit(self.allocator);
+            self.registers[idx] = .{ .nil = {} };
+        }
+
+        return @intCast(desired_count);
+    }
+
+    fn abortProtectedCallWithMessage(self: *VM, message: ScriptValue) ExecutionError!NativeCallResult {
+        if (self.protected_calls.items.len == 0) {
+            var tmp = message;
+            tmp.deinit(self.allocator);
+            return ExecutionError.ScriptError;
+        }
+
+        const context_index = self.protected_calls.items.len - 1;
+        const context = self.protected_calls.items[context_index];
+
+        var frame_return_pc: usize = 0;
+        var found = false;
+
+        while (self.call_stack.items.len > 0) {
+            const idx = self.call_stack.items.len - 1;
+            const frame = self.call_stack.items[idx];
+            self.call_stack.items.len = idx;
+            self.cleanupVarargs(frame);
+
+            while (self.scopes.items.len > frame.scope_depth) {
+                _ = self.popScope() catch {};
+            }
+
+            if (idx == context.call_frame_index) {
+                frame_return_pc = frame.return_pc;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            var tmp = message;
+            tmp.deinit(self.allocator);
+            self.protected_calls.items.len = context_index;
+            return ExecutionError.ScopeUnderflow;
+        }
+
+        while (self.scopes.items.len > context.scope_depth) {
+            _ = self.popScope() catch {};
+        }
+
+        const final_count = try self.finalizeProtectedFailure(context, message);
+        self.protected_calls.items.len = context_index;
+        self.pc = frame_return_pc;
+
+        return NativeCallResult{ .last_result_count = final_count, .advance_pc = false };
+    }
+
+    fn errorToMessage(self: *VM, err: ExecutionError) !ScriptValue {
+        const text = switch (err) {
+            ExecutionError.MemoryLimitExceeded => "memory limit exceeded",
+            ExecutionError.ExecutionTimeout => "execution timed out",
+            ExecutionError.IONotAllowed => "io not allowed",
+            ExecutionError.SyscallNotAllowed => "syscall not allowed",
+            ExecutionError.SecurityViolation => "security violation",
+            ExecutionError.ParseError => "parse error",
+            ExecutionError.TypeError => "type error",
+            ExecutionError.FunctionNotFound => "function not found",
+            ExecutionError.NotAFunction => "value is not callable",
+            ExecutionError.UndefinedVariable => "undefined variable",
+            ExecutionError.ScopeUnderflow => "scope underflow",
+            ExecutionError.InvalidFunctionName => "invalid function name",
+            ExecutionError.InvalidGlobalName => "invalid global name",
+            ExecutionError.GlobalNotFound => "global not found",
+            ExecutionError.UnsupportedArgumentType => "unsupported argument type",
+            ExecutionError.OutOfMemory => "out of memory",
+            ExecutionError.ScriptError => "script error",
+        };
+        const dup = try self.allocator.dupe(u8, text);
+        return ScriptValue{ .string = dup };
+    }
+
+    fn createStringValue(self: *VM, text: []const u8) !ScriptValue {
+        const dup = try self.allocator.dupe(u8, text);
+        return ScriptValue{ .string = dup };
     }
 
     fn copyValue(self: *VM, value: ScriptValue) !ScriptValue {
@@ -2740,6 +3102,15 @@ pub const VM = struct {
             .upvalue => |up| try up.getCopy(self.allocator),
             else => try self.copyValue(value),
         };
+    }
+
+    fn cleanupVarargs(self: *VM, frame: CallFrame) void {
+        if (!frame.owns_varargs) return;
+        var idx: usize = 0;
+        while (idx < frame.varargs.len) : (idx += 1) {
+            frame.varargs[idx].deinit(self.allocator);
+        }
+        self.allocator.free(frame.varargs);
     }
 
     fn coerceIteratorValue(self: *VM, value: ScriptValue, var_count: u16) ExecutionError!ScriptValue {
@@ -2967,6 +3338,10 @@ pub const VM = struct {
                 .function => |bfunc| return afunc == bfunc,
                 else => return false,
             },
+            .native_function => |afunc| switch (b) {
+                .native_function => |bfunc| return afunc.call == bfunc.call and afunc.context == bfunc.context,
+                else => return false,
+            },
             .script_function => |afunc| switch (b) {
                 .script_function => |bfunc| return afunc == bfunc,
                 else => return false,
@@ -2990,6 +3365,695 @@ pub const VM = struct {
         }
     }
 };
+
+// ============================================================================
+// Lua-style Pattern Utilities
+// ============================================================================
+
+const max_pattern_captures = 16;
+
+const PatternError = error{
+    InvalidPattern,
+    TooManyCaptures,
+    UnbalancedCapture,
+    OutOfMemory,
+};
+
+const PatternQuantifier = enum {
+    exact,
+    zero_or_one,
+    zero_or_more,
+    one_or_more,
+    zero_or_more_nongreedy,
+};
+
+const PatternElementKind = enum {
+    matcher,
+    anchor_start,
+    anchor_end,
+    begin_capture,
+    end_capture,
+};
+
+const PatternClass = enum {
+    digit,
+    nondigit,
+    alpha,
+    nonalpha,
+    alnum,
+    nonalnum,
+    space,
+    nonspace,
+    lower,
+    nonlower,
+    upper,
+    nonupper,
+    punct,
+    nonpunct,
+    control,
+    noncontrol,
+    hex,
+    nonhex,
+    zero,
+    nonzero,
+};
+
+const PatternCharSet = struct {
+    bits: [256]bool = [_]bool{false} ** 256,
+
+    fn setChar(self: *PatternCharSet, ch: u8) void {
+        self.bits[ch] = true;
+    }
+
+    fn setRange(self: *PatternCharSet, first: u8, last: u8) void {
+        var start = first;
+        var finish = last;
+        if (start > finish) {
+            const tmp = start;
+            start = finish;
+            finish = tmp;
+        }
+        var idx = start;
+        while (idx <= finish) : (idx += 1) {
+            self.bits[idx] = true;
+        }
+    }
+
+    fn addClass(self: *PatternCharSet, class: PatternClass) void {
+        var idx: usize = 0;
+        while (idx < 256) : (idx += 1) {
+            if (classContains(class, @as(u8, @intCast(idx)))) {
+                self.bits[idx] = true;
+            }
+        }
+    }
+
+    fn contains(self: PatternCharSet, ch: u8, negate: bool) bool {
+        const present = self.bits[ch];
+        return if (negate) !present else present;
+    }
+};
+
+const PatternMatcherKind = enum {
+    literal,
+    any,
+    class,
+    set,
+};
+
+const PatternMatcher = struct {
+    kind: PatternMatcherKind = .any,
+    literal: u8 = 0,
+    class: PatternClass = .digit,
+    set: PatternCharSet = PatternCharSet{},
+    negate: bool = false,
+};
+
+const PatternElement = struct {
+    kind: PatternElementKind,
+    matcher: PatternMatcher = PatternMatcher{},
+    quant: PatternQuantifier = .exact,
+    capture_index: usize = 0,
+};
+
+const CaptureState = struct {
+    start: usize = 0,
+    end: usize = 0,
+    valid: bool = false,
+};
+
+const PatternState = struct {
+    captures: [max_pattern_captures]CaptureState,
+    capture_total: usize,
+    stack: [max_pattern_captures]usize,
+    stack_len: usize,
+
+    fn init(capture_total: usize) PatternState {
+        return PatternState{
+            .captures = [_]CaptureState{CaptureState{}} ** max_pattern_captures,
+            .capture_total = capture_total,
+            .stack = [_]usize{0} ** max_pattern_captures,
+            .stack_len = 0,
+        };
+    }
+
+    fn pushCapture(self: *PatternState, idx: usize, start: usize) bool {
+        if (self.stack_len >= max_pattern_captures or idx >= max_pattern_captures) return false;
+        self.stack[self.stack_len] = idx;
+        self.stack_len += 1;
+        self.captures[idx] = CaptureState{ .start = start, .end = start, .valid = false };
+        return true;
+    }
+
+    fn popCapture(self: *PatternState) ?usize {
+        if (self.stack_len == 0) return null;
+        self.stack_len -= 1;
+        return self.stack[self.stack_len];
+    }
+};
+
+const CaptureRange = struct {
+    has: bool = false,
+    start: usize = 0,
+    end: usize = 0,
+};
+
+const PatternMatch = struct {
+    start: usize,
+    end: usize,
+    capture_count: usize,
+    captures: [max_pattern_captures]CaptureRange,
+};
+
+const MatchOutcome = struct {
+    state: PatternState,
+    end_index: usize,
+};
+
+const Pattern = struct {
+    allocator: std.mem.Allocator,
+    elements: []PatternElement,
+    capture_total: usize,
+
+    fn deinit(self: *Pattern) void {
+        self.allocator.free(self.elements);
+        self.elements = &[_]PatternElement{};
+    }
+
+    fn hasAnchorStart(self: Pattern) bool {
+        if (self.elements.len == 0) return false;
+        return self.elements[0].kind == .anchor_start;
+    }
+
+    fn matchElements(self: *Pattern, subject: []const u8, si: usize, elem_idx: usize, state: PatternState) ?MatchOutcome {
+        if (elem_idx >= self.elements.len) {
+            return MatchOutcome{ .state = state, .end_index = si };
+        }
+
+        const element = self.elements[elem_idx];
+        switch (element.kind) {
+            .anchor_start => {
+                if (si != 0) return null;
+                return self.matchElements(subject, si, elem_idx + 1, state);
+            },
+            .anchor_end => {
+                if (si != subject.len) return null;
+                return self.matchElements(subject, si, elem_idx + 1, state);
+            },
+            .begin_capture => {
+                var next_state = state;
+                if (!next_state.pushCapture(element.capture_index, si)) return null;
+                return self.matchElements(subject, si, elem_idx + 1, next_state);
+            },
+            .end_capture => {
+                var next_state = state;
+                const idx_opt = next_state.popCapture() orelse return null;
+                if (idx_opt >= max_pattern_captures) return null;
+                next_state.captures[idx_opt].end = si;
+                next_state.captures[idx_opt].valid = true;
+                return self.matchElements(subject, si, elem_idx + 1, next_state);
+            },
+            .matcher => return self.matchMatcher(subject, si, elem_idx, state),
+        }
+    }
+
+    fn matchMatcher(self: *Pattern, subject: []const u8, si: usize, elem_idx: usize, state: PatternState) ?MatchOutcome {
+        const element = self.elements[elem_idx];
+        const matcher = element.matcher;
+        const next_idx = elem_idx + 1;
+
+        var available: usize = 0;
+        var cursor = si;
+        while (cursor < subject.len and matcherMatches(matcher, subject[cursor])) : (cursor += 1) {
+            available += 1;
+        }
+
+        const min_required: usize = switch (element.quant) {
+            .exact => 1,
+            .one_or_more => 1,
+            else => 0,
+        };
+
+        if (available < min_required) return null;
+
+        const attempt = struct {
+            fn run(parent: *Pattern, subj: []const u8, idx: usize, next: usize, state_copy: PatternState) ?MatchOutcome {
+                return parent.matchElements(subj, idx, next, state_copy);
+            }
+        };
+
+        switch (element.quant) {
+            .exact => {
+                if (available == 0) return null;
+                return attempt.run(self, subject, si + 1, next_idx, state);
+            },
+            .one_or_more => {
+                var count = available;
+                while (count >= 1) : (count -= 1) {
+                    if (attempt.run(self, subject, si + count, next_idx, state)) |result| {
+                        return result;
+                    }
+                }
+                return null;
+            },
+            .zero_or_more => {
+                var count = available;
+                while (true) {
+                    if (attempt.run(self, subject, si + count, next_idx, state)) |result| {
+                        return result;
+                    }
+                    if (count == 0) break;
+                    count -= 1;
+                }
+                return null;
+            },
+            .zero_or_more_nongreedy => {
+                var count: usize = 0;
+                while (count <= available) : (count += 1) {
+                    if (attempt.run(self, subject, si + count, next_idx, state)) |result| {
+                        return result;
+                    }
+                }
+                return null;
+            },
+            .zero_or_one => {
+                if (available > 0) {
+                    if (attempt.run(self, subject, si + 1, next_idx, state)) |result| {
+                        return result;
+                    }
+                }
+                return attempt.run(self, subject, si, next_idx, state);
+            },
+        }
+    }
+
+    fn findFirst(self: *Pattern, subject: []const u8, start_index: usize) ?PatternMatch {
+        var start = start_index;
+        const anchored_start = self.hasAnchorStart();
+        while (start <= subject.len) {
+            const state = PatternState.init(self.capture_total);
+            if (self.matchElements(subject, start, 0, state)) |outcome| {
+                var captures: [max_pattern_captures]CaptureRange = [_]CaptureRange{CaptureRange{}} ** max_pattern_captures;
+                var idx: usize = 0;
+                while (idx < self.capture_total) : (idx += 1) {
+                    const capture_state = outcome.state.captures[idx];
+                    if (capture_state.valid) {
+                        captures[idx] = CaptureRange{ .has = true, .start = capture_state.start, .end = capture_state.end };
+                    }
+                }
+                return PatternMatch{
+                    .start = start,
+                    .end = outcome.end_index,
+                    .capture_count = self.capture_total,
+                    .captures = captures,
+                };
+            }
+            if (anchored_start or start == subject.len) break;
+            start += 1;
+        }
+        return null;
+    }
+};
+
+fn matcherMatches(matcher: PatternMatcher, ch: u8) bool {
+    return switch (matcher.kind) {
+        .literal => ch == matcher.literal,
+        .any => true,
+        .class => classContains(matcher.class, ch),
+        .set => matcher.set.contains(ch, matcher.negate),
+    };
+}
+
+inline fn asciiIsHexDigit(ch: u8) bool {
+    return (ch >= '0' and ch <= '9') or (ch >= 'a' and ch <= 'f') or (ch >= 'A' and ch <= 'F');
+}
+
+fn classContains(class: PatternClass, ch: u8) bool {
+    return switch (class) {
+        .digit => std.ascii.isDigit(ch),
+        .nondigit => !std.ascii.isDigit(ch),
+        .alpha => std.ascii.isAlphabetic(ch),
+        .nonalpha => !std.ascii.isAlphabetic(ch),
+        .alnum => std.ascii.isAlphanumeric(ch) or ch == '_',
+        .nonalnum => !(std.ascii.isAlphanumeric(ch) or ch == '_'),
+        .space => std.ascii.isWhitespace(ch),
+        .nonspace => !std.ascii.isWhitespace(ch),
+        .lower => std.ascii.isLower(ch),
+        .nonlower => !std.ascii.isLower(ch),
+        .upper => std.ascii.isUpper(ch),
+        .nonupper => !std.ascii.isUpper(ch),
+        .punct => !std.ascii.isAlphanumeric(ch) and !std.ascii.isWhitespace(ch),
+        .nonpunct => std.ascii.isAlphanumeric(ch) or std.ascii.isWhitespace(ch),
+        .control => ch < 0x20 or ch == 0x7F,
+        .noncontrol => !(ch < 0x20 or ch == 0x7F),
+        .hex => asciiIsHexDigit(ch),
+        .nonhex => !asciiIsHexDigit(ch),
+        .zero => ch == 0,
+        .nonzero => ch != 0,
+    };
+}
+
+fn parseClassChar(ch: u8) ?PatternClass {
+    return switch (ch) {
+        'a' => PatternClass.alpha,
+        'A' => PatternClass.nonalpha,
+        'd' => PatternClass.digit,
+        'D' => PatternClass.nondigit,
+        'w' => PatternClass.alnum,
+        'W' => PatternClass.nonalnum,
+        's' => PatternClass.space,
+        'S' => PatternClass.nonspace,
+        'l' => PatternClass.lower,
+        'L' => PatternClass.nonlower,
+        'u' => PatternClass.upper,
+        'U' => PatternClass.nonupper,
+        'p' => PatternClass.punct,
+        'P' => PatternClass.nonpunct,
+        'c' => PatternClass.control,
+        'C' => PatternClass.noncontrol,
+        'x' => PatternClass.hex,
+        'X' => PatternClass.nonhex,
+        'z' => PatternClass.zero,
+        'Z' => PatternClass.nonzero,
+        else => null,
+    };
+}
+
+fn compilePattern(allocator: std.mem.Allocator, pattern: []const u8) PatternError!Pattern {
+    var elements = std.ArrayList(PatternElement){};
+    errdefer elements.deinit(allocator);
+
+    var capture_stack: [max_pattern_captures]usize = undefined;
+    var capture_stack_len: usize = 0;
+    var capture_total: usize = 0;
+
+    var i: usize = 0;
+    while (i < pattern.len) {
+        var consumed: usize = 1;
+        var element: PatternElement = undefined;
+        const ch = pattern[i];
+
+        if (ch == '%') {
+            if (i + 1 >= pattern.len) return PatternError.InvalidPattern;
+            const next = pattern[i + 1];
+            if (parseClassChar(next)) |class| {
+                element = PatternElement{
+                    .kind = .matcher,
+                    .matcher = PatternMatcher{
+                        .kind = .class,
+                        .class = class,
+                    },
+                    .quant = .exact,
+                };
+            } else {
+                element = PatternElement{
+                    .kind = .matcher,
+                    .matcher = PatternMatcher{
+                        .kind = .literal,
+                        .literal = next,
+                    },
+                    .quant = .exact,
+                };
+            }
+            consumed = 2;
+        } else if (ch == '[') {
+            var set = PatternCharSet{};
+            var negate = false;
+            var idx = i + 1;
+            if (idx < pattern.len and pattern[idx] == '^') {
+                negate = true;
+                idx += 1;
+            }
+            if (idx >= pattern.len) return PatternError.InvalidPattern;
+            var first = true;
+            while (idx < pattern.len and pattern[idx] != ']') {
+                var current = pattern[idx];
+                if (current == '%' and idx + 1 < pattern.len) {
+                    if (parseClassChar(pattern[idx + 1])) |class| {
+                        set.addClass(class);
+                        idx += 2;
+                        first = false;
+                        continue;
+                    } else {
+                        current = pattern[idx + 1];
+                        idx += 2;
+                        if (first and current == ']') {
+                            set.setChar(current);
+                            first = false;
+                            continue;
+                        }
+                    }
+                } else if (current == '\\' and idx + 1 < pattern.len) {
+                    current = pattern[idx + 1];
+                    idx += 2;
+                } else {
+                    idx += 1;
+                }
+
+                if (!first and idx < pattern.len and pattern[idx] == '-' and idx + 1 < pattern.len and pattern[idx + 1] != ']') {
+                    const range_end = pattern[idx + 1];
+                    set.setRange(current, range_end);
+                    idx += 2;
+                } else {
+                    set.setChar(current);
+                }
+                first = false;
+            }
+            if (idx >= pattern.len or pattern[idx] != ']') return PatternError.InvalidPattern;
+            consumed = idx - i + 1;
+            element = PatternElement{
+                .kind = .matcher,
+                .matcher = PatternMatcher{
+                    .kind = .set,
+                    .set = set,
+                    .negate = negate,
+                },
+                .quant = .exact,
+            };
+        } else if (ch == '(') {
+            if (capture_total >= max_pattern_captures or capture_stack_len >= max_pattern_captures) return PatternError.TooManyCaptures;
+            capture_stack[capture_stack_len] = capture_total;
+            capture_stack_len += 1;
+            element = PatternElement{
+                .kind = .begin_capture,
+                .capture_index = capture_total,
+            };
+            capture_total += 1;
+        } else if (ch == ')') {
+            if (capture_stack_len == 0) return PatternError.UnbalancedCapture;
+            capture_stack_len -= 1;
+            const cap_idx = capture_stack[capture_stack_len];
+            element = PatternElement{
+                .kind = .end_capture,
+                .capture_index = cap_idx,
+            };
+        } else if (ch == '^' and i == 0) {
+            element = PatternElement{ .kind = .anchor_start };
+        } else if (ch == '$' and i + 1 == pattern.len) {
+            element = PatternElement{ .kind = .anchor_end };
+        } else if (ch == '*' or ch == '+' or ch == '?' or ch == '-') {
+            return PatternError.InvalidPattern;
+        } else {
+            element = PatternElement{
+                .kind = .matcher,
+                .matcher = PatternMatcher{
+                    .kind = if (ch == '.') .any else .literal,
+                    .literal = ch,
+                },
+                .quant = .exact,
+            };
+        }
+
+        i += consumed;
+
+        if (element.kind == .matcher and i < pattern.len) {
+            const next_char = pattern[i];
+            switch (next_char) {
+                '*' => {
+                    element.quant = .zero_or_more;
+                    i += 1;
+                },
+                '+' => {
+                    element.quant = .one_or_more;
+                    i += 1;
+                },
+                '?' => {
+                    element.quant = .zero_or_one;
+                    i += 1;
+                },
+                '-' => {
+                    element.quant = .zero_or_more_nongreedy;
+                    i += 1;
+                },
+                else => {},
+            }
+        }
+
+        try elements.append(allocator, element);
+    }
+
+    if (capture_stack_len != 0) return PatternError.UnbalancedCapture;
+
+    const slice = try elements.toOwnedSlice(allocator);
+    return Pattern{
+        .allocator = allocator,
+        .elements = slice,
+        .capture_total = capture_total,
+    };
+}
+
+fn executePatternMatch(
+    allocator: std.mem.Allocator,
+    subject: []const u8,
+    pattern_text: []const u8,
+    start_index: usize,
+) PatternError!?PatternMatch {
+    var compiled = try compilePattern(allocator, pattern_text);
+    defer compiled.deinit();
+    return compiled.findFirst(subject, start_index);
+}
+
+fn luaNormalizeStart(index: f64, len: usize) usize {
+    const floored = std.math.floor(index);
+    var value = @as(isize, @intFromFloat(floored));
+    if (value >= 0) {
+        value -= 1;
+    } else {
+        value = @as(isize, @intCast(len)) + value;
+    }
+    if (value < 0) value = 0;
+    if (value > @as(isize, @intCast(len))) value = @intCast(len);
+    return @intCast(value);
+}
+
+fn luaNormalizeEnd(index: f64, len: usize) usize {
+    const floored = std.math.floor(index);
+    var value = @as(isize, @intFromFloat(floored));
+    if (value >= 0) {
+        // Lua end indices are inclusive; convert to exclusive end
+    } else {
+        value = @as(isize, @intCast(len)) + value + 1;
+    }
+    if (value < 0) value = 0;
+    if (value > @as(isize, @intCast(len))) value = @intCast(len);
+    return @intCast(value);
+}
+
+fn computeSubRange(len: usize, start_idx: f64, end_idx: ?f64) struct { start: usize, end: usize } {
+    const start = luaNormalizeStart(start_idx, len);
+    var end_exclusive: usize = len;
+    if (end_idx) |val| {
+        end_exclusive = luaNormalizeEnd(val, len);
+    }
+    if (end_exclusive < start) end_exclusive = start;
+    if (end_exclusive > len) end_exclusive = len;
+    return .{ .start = start, .end = end_exclusive };
+}
+
+fn scriptValueToString(allocator: std.mem.Allocator, value: ScriptValue) ![]u8 {
+    return switch (value) {
+        .nil => allocator.dupe(u8, "nil"),
+        .boolean => |b| allocator.dupe(u8, if (b) "true" else "false"),
+        .number => |num| std.fmt.allocPrint(allocator, "{}", .{num}),
+        .string => |str| allocator.dupe(u8, str),
+        .table => allocator.dupe(u8, "<table>"),
+        .array => allocator.dupe(u8, "<array>"),
+        .function => allocator.dupe(u8, "<function>"),
+        .native_function => allocator.dupe(u8, "<function>"),
+        .script_function => allocator.dupe(u8, "<function>"),
+        .iterator => allocator.dupe(u8, "<iterator>"),
+        .upvalue => allocator.dupe(u8, "<upvalue>"),
+    };
+}
+
+fn appendReplacement(
+    builder: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    replacement: []const u8,
+    subject: []const u8,
+    match: PatternMatch,
+) PatternError!void {
+    var idx: usize = 0;
+    while (idx < replacement.len) {
+        const ch = replacement[idx];
+        if (ch == '%' and idx + 1 < replacement.len) {
+            const next = replacement[idx + 1];
+            if (next == '%') {
+                builder.append(allocator, next) catch return PatternError.OutOfMemory;
+                idx += 2;
+                continue;
+            }
+            if (std.ascii.isDigit(next)) {
+                const cap_index = next - '0';
+                if (cap_index == 0) {
+                    if (match.end > match.start) {
+                        builder.appendSlice(allocator, subject[match.start..match.end]) catch return PatternError.OutOfMemory;
+                    }
+                } else if (cap_index <= match.capture_count) {
+                    const range = match.captures[cap_index - 1];
+                    if (range.has and range.end > range.start and range.end <= subject.len) {
+                        builder.appendSlice(allocator, subject[range.start..range.end]) catch return PatternError.OutOfMemory;
+                    }
+                }
+                idx += 2;
+                continue;
+            }
+            builder.append(allocator, next) catch return PatternError.OutOfMemory;
+            idx += 2;
+            continue;
+        }
+        builder.append(allocator, ch) catch return PatternError.OutOfMemory;
+        idx += 1;
+    }
+}
+
+fn performGlobalSubstitute(
+    allocator: std.mem.Allocator,
+    subject: []const u8,
+    pattern_text: []const u8,
+    replacement: []const u8,
+    max_replacements: ?usize,
+) PatternError!struct { text: []u8, count: usize } {
+    var compiled = try compilePattern(allocator, pattern_text);
+    defer compiled.deinit();
+
+    var builder = std.ArrayList(u8){};
+    errdefer builder.deinit(allocator);
+
+    var cursor: usize = 0;
+    var replacements: usize = 0;
+    while (cursor <= subject.len) {
+        if (max_replacements) |limit| if (replacements >= limit) break;
+
+        const match_opt = compiled.findFirst(subject, cursor) orelse break;
+        if (match_opt.start < cursor) break;
+
+        if (match_opt.start > cursor) {
+            builder.appendSlice(allocator, subject[cursor..match_opt.start]) catch return PatternError.OutOfMemory;
+        }
+
+        try appendReplacement(&builder, allocator, replacement, subject, match_opt);
+        replacements += 1;
+
+        if (match_opt.end > cursor) {
+            cursor = match_opt.end;
+        } else {
+            if (cursor < subject.len) {
+                builder.append(allocator, subject[cursor]) catch return PatternError.OutOfMemory;
+                cursor += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    if (cursor < subject.len) {
+        builder.appendSlice(allocator, subject[cursor..]) catch return PatternError.OutOfMemory;
+    }
+
+    const owned = builder.toOwnedSlice(allocator) catch return PatternError.OutOfMemory;
+    return .{ .text = owned, .count = replacements };
+}
 
 // ============================================================================
 // Built-in Functions
@@ -3023,10 +4087,15 @@ pub const BuiltinFunctions = struct {
         if (args[0] != .string) return .{ .nil = {} };
 
         const input = args[0].string;
-        // For simplicity, return original for now - proper implementation would allocate
-        // TODO: Implement proper string allocation and transformation
-        _ = input;
-        return args[0];
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        var duplicated = allocator.alloc(u8, input.len) catch {
+            return .{ .nil = {} };
+        };
+        var idx: usize = 0;
+        while (idx < input.len) : (idx += 1) {
+            duplicated[idx] = std.ascii.toUpper(input[idx]);
+        }
+        return .{ .string = duplicated };
     }
 
     pub fn builtin_toLowerCase(args: []const ScriptValue) ScriptValue {
@@ -3034,10 +4103,15 @@ pub const BuiltinFunctions = struct {
         if (args[0] != .string) return .{ .nil = {} };
 
         const input = args[0].string;
-        // For simplicity, return original for now - proper implementation would allocate
-        // TODO: Implement proper string allocation and transformation
-        _ = input;
-        return args[0];
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        var duplicated = allocator.alloc(u8, input.len) catch {
+            return .{ .nil = {} };
+        };
+        var idx: usize = 0;
+        while (idx < input.len) : (idx += 1) {
+            duplicated[idx] = std.ascii.toLower(input[idx]);
+        }
+        return .{ .string = duplicated };
     }
 
     pub fn builtin_print(args: []const ScriptValue) ScriptValue {
@@ -3048,6 +4122,7 @@ pub const BuiltinFunctions = struct {
                 .number => |n| std.debug.print("{d}", .{n}),
                 .string => |s| std.debug.print("{s}", .{s}),
                 .function => std.debug.print("<function>", .{}),
+                .native_function => std.debug.print("<function>", .{}),
                 .script_function => std.debug.print("<function>", .{}),
                 .table => std.debug.print("<table>", .{}),
                 .array => std.debug.print("<array>", .{}),
@@ -3068,6 +4143,7 @@ pub const BuiltinFunctions = struct {
             .number => "number",
             .string => "string",
             .function => "function",
+            .native_function => "function",
             .script_function => "function",
             .table => "table",
             .array => "array",
@@ -3179,24 +4255,341 @@ pub const BuiltinFunctions = struct {
     }
 
     pub fn builtin_find(args: []const ScriptValue) ScriptValue {
-        if (args.len != 2) return .{ .nil = {} };
+        if (args.len < 2) return .{ .nil = {} };
         if (args[0] != .string or args[1] != .string) return .{ .nil = {} };
-        const haystack = args[0].string;
-        const needle = args[1].string;
-        if (needle.len == 0) return .{ .number = 1 };
-        if (std.mem.indexOf(u8, haystack, needle)) |idx| {
-            return .{ .number = @floatFromInt(idx + 1) };
+
+        const subject = args[0].string;
+        const pattern_text = args[1].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+
+        var start_index: usize = 0;
+        if (args.len >= 3 and args[2] == .number) {
+            start_index = luaNormalizeStart(args[2].number, subject.len);
+        }
+
+        const result = executePatternMatch(allocator, subject, pattern_text, start_index) catch {
+            return .{ .nil = {} };
+        };
+
+        if (result) |match_info| {
+            return .{ .number = @floatFromInt(match_info.start + 1) };
         }
         return .{ .nil = {} };
     }
 
     pub fn builtin_match(args: []const ScriptValue) ScriptValue {
-        if (args.len != 2) return .{ .nil = {} };
+        if (args.len < 2) return .{ .nil = {} };
         if (args[0] != .string or args[1] != .string) return .{ .nil = {} };
-        const haystack = args[0].string;
-        const needle = args[1].string;
-        if (needle.len == 0) return .{ .boolean = true };
-        return .{ .boolean = std.mem.indexOf(u8, haystack, needle) != null };
+
+        const subject = args[0].string;
+        const pattern_text = args[1].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+
+        var start_index: usize = 0;
+        if (args.len >= 3 and args[2] == .number) {
+            start_index = luaNormalizeStart(args[2].number, subject.len);
+        }
+
+        const result = executePatternMatch(allocator, subject, pattern_text, start_index) catch {
+            return .{ .nil = {} };
+        };
+
+        if (result) |match_info| {
+            if (match_info.capture_count > 0) {
+                var idx: usize = 0;
+                while (idx < match_info.capture_count) : (idx += 1) {
+                    const capture = match_info.captures[idx];
+                    if (capture.has and capture.end > capture.start and capture.end <= subject.len) {
+                        const dup = allocator.dupe(u8, subject[capture.start..capture.end]) catch {
+                            return .{ .nil = {} };
+                        };
+                        return .{ .string = dup };
+                    }
+                }
+            }
+
+            if (match_info.end > match_info.start and match_info.end <= subject.len) {
+                const dup = allocator.dupe(u8, subject[match_info.start..match_info.end]) catch {
+                    return .{ .nil = {} };
+                };
+                return .{ .string = dup };
+            }
+        }
+
+        return .{ .nil = {} };
+    }
+
+    pub fn builtin_sub(args: []const ScriptValue) ScriptValue {
+        if (args.len < 2 or args.len > 3) return .{ .nil = {} };
+        if (args[0] != .string or args[1] != .number) return .{ .nil = {} };
+
+        const subject = args[0].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const end_value: ?f64 = if (args.len == 3 and args[2] == .number) args[2].number else null;
+        const range = computeSubRange(subject.len, args[1].number, end_value);
+        const slice = subject[range.start..range.end];
+        const dup = allocator.dupe(u8, slice) catch {
+            return .{ .nil = {} };
+        };
+        return .{ .string = dup };
+    }
+
+    pub fn builtin_gsub(args: []const ScriptValue) ScriptValue {
+        if (args.len < 3) return .{ .nil = {} };
+        if (args[0] != .string or args[1] != .string or args[2] != .string) return .{ .nil = {} };
+
+        const subject = args[0].string;
+        const pattern_text = args[1].string;
+        const replacement = args[2].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+
+        var limit: ?usize = null;
+        if (args.len >= 4 and args[3] == .number) {
+            if (args[3].number > 0) {
+                limit = @intCast(@as(usize, @intFromFloat(std.math.floor(args[3].number))));
+            }
+        }
+
+        const substituted = performGlobalSubstitute(allocator, subject, pattern_text, replacement, limit) catch {
+            return .{ .nil = {} };
+        };
+        return .{ .string = substituted.text };
+    }
+
+    pub fn builtin_format(args: []const ScriptValue) ScriptValue {
+        if (args.len == 0) return .{ .nil = {} };
+        if (args[0] != .string) return .{ .nil = {} };
+
+        const format_str = args[0].string;
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        var builder = std.ArrayList(u8){};
+        errdefer builder.deinit(allocator);
+
+        var i: usize = 0;
+        var arg_index: usize = 1;
+        while (i < format_str.len) {
+            const ch = format_str[i];
+            if (ch == '%' and i + 1 < format_str.len) {
+                const spec = format_str[i + 1];
+                if (spec == '%') {
+                    builder.append(allocator, '%') catch {
+                        builder.deinit(allocator);
+                        return .{ .nil = {} };
+                    };
+                    i += 2;
+                    continue;
+                }
+                if (arg_index >= args.len) {
+                    builder.deinit(allocator);
+                    return .{ .nil = {} };
+                }
+                const value = args[arg_index];
+                arg_index += 1;
+                switch (spec) {
+                    's' => {
+                        const temp = scriptValueToString(allocator, value) catch {
+                            builder.deinit(allocator);
+                            return .{ .nil = {} };
+                        };
+                        defer allocator.free(temp);
+                        builder.appendSlice(allocator, temp) catch {
+                            builder.deinit(allocator);
+                            return .{ .nil = {} };
+                        };
+                    },
+                    'd', 'i' => {
+                        if (value != .number) {
+                            builder.deinit(allocator);
+                            return .{ .nil = {} };
+                        }
+                        const truncated = std.math.trunc(value.number);
+                        const integer = @as(i64, @intFromFloat(truncated));
+                        var buffer: [64]u8 = undefined;
+                        const printed = std.fmt.bufPrint(&buffer, "{}", .{integer}) catch unreachable;
+                        builder.appendSlice(allocator, printed) catch {
+                            builder.deinit(allocator);
+                            return .{ .nil = {} };
+                        };
+                    },
+                    'f' => {
+                        if (value != .number) {
+                            builder.deinit(allocator);
+                            return .{ .nil = {} };
+                        }
+                        var buffer: [128]u8 = undefined;
+                        const printed = std.fmt.bufPrint(&buffer, "{:.6}", .{value.number}) catch unreachable;
+                        builder.appendSlice(allocator, printed) catch {
+                            builder.deinit(allocator);
+                            return .{ .nil = {} };
+                        };
+                    },
+                    else => {
+                        builder.deinit(allocator);
+                        return .{ .nil = {} };
+                    },
+                }
+                i += 2;
+                continue;
+            }
+            builder.append(allocator, ch) catch {
+                builder.deinit(allocator);
+                return .{ .nil = {} };
+            };
+            i += 1;
+        }
+
+        const output = builder.toOwnedSlice(allocator) catch {
+            builder.deinit(allocator);
+            return .{ .nil = {} };
+        };
+        return .{ .string = output };
+    }
+
+    fn builtin_pcall_native(
+        _: ?*anyopaque,
+        vm_ptr: *anyopaque,
+        dest_reg: u16,
+        arg_start: u16,
+        arg_count: u16,
+        expected_results: u16,
+    ) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+
+        const effective_expected: u16 = if (expected_results == 0)
+            0
+        else if (expected_results == 1)
+            2
+        else
+            expected_results;
+
+        if (arg_count == 0) {
+            const message = try vm.createStringValue("pcall requires function");
+            const context = ProtectedCall{
+                .dest_reg = dest_reg,
+                .expected_results = effective_expected,
+                .result_base = arg_start,
+                .scope_depth = vm.scopes.items.len,
+                .call_frame_index = vm.call_stack.items.len,
+                .arg_count = 0,
+            };
+            const final_count = try vm.finalizeProtectedFailure(context, message);
+            return NativeCallResult{ .last_result_count = final_count, .advance_pc = true };
+        }
+
+        const func_index: usize = @intCast(arg_start);
+        const func_value = vm.registers[func_index];
+        const target_arg_count: u16 = arg_count - 1;
+        const args_start = arg_start + 1;
+
+        switch (func_value) {
+            .script_function => |script_func| {
+                const context_index = vm.protected_calls.items.len;
+                try vm.protected_calls.append(vm.allocator, .{
+                    .dest_reg = dest_reg,
+                    .expected_results = effective_expected,
+                    .result_base = arg_start,
+                    .scope_depth = vm.scopes.items.len,
+                    .call_frame_index = vm.call_stack.items.len,
+                    .arg_count = target_arg_count,
+                });
+
+                vm.invokeScriptFunction(script_func, arg_start, args_start, target_arg_count, 0, context_index) catch |err| {
+                    vm.protected_calls.items.len = context_index;
+                    const message = try vm.errorToMessage(err);
+                    const context = ProtectedCall{
+                        .dest_reg = dest_reg,
+                        .expected_results = effective_expected,
+                        .result_base = arg_start,
+                        .scope_depth = vm.scopes.items.len,
+                        .call_frame_index = vm.call_stack.items.len,
+                        .arg_count = target_arg_count,
+                    };
+                    const final_count = try vm.finalizeProtectedFailure(context, message);
+                    return NativeCallResult{ .last_result_count = final_count, .advance_pc = true };
+                };
+
+                vm.protected_calls.items[context_index].call_frame_index = vm.call_stack.items.len - 1;
+                return NativeCallResult{ .last_result_count = 0, .advance_pc = false };
+            },
+            .function => |callable| {
+                const args_slice = vm.registers[@as(usize, args_start) .. @as(usize, args_start) + @as(usize, target_arg_count)];
+                const result = callable(args_slice);
+
+                const context_index = vm.protected_calls.items.len;
+                try vm.protected_calls.append(vm.allocator, .{
+                    .dest_reg = dest_reg,
+                    .expected_results = effective_expected,
+                    .result_base = arg_start,
+                    .scope_depth = vm.scopes.items.len,
+                    .call_frame_index = vm.call_stack.items.len,
+                    .arg_count = target_arg_count,
+                });
+
+                vm.setRegister(arg_start, result);
+                const final_count = try vm.finalizeProtectedSuccess(context_index, 1);
+                return NativeCallResult{ .last_result_count = final_count, .advance_pc = true };
+            },
+            .native_function => |native| {
+                const context_index = vm.protected_calls.items.len;
+                try vm.protected_calls.append(vm.allocator, .{
+                    .dest_reg = dest_reg,
+                    .expected_results = effective_expected,
+                    .result_base = arg_start,
+                    .scope_depth = vm.scopes.items.len,
+                    .call_frame_index = vm.call_stack.items.len,
+                    .arg_count = target_arg_count,
+                });
+
+                const outcome = vm.invokeNativeFunction(native, arg_start, args_start, target_arg_count, 0) catch |err| {
+                    vm.protected_calls.items.len = context_index;
+                    const message = try vm.errorToMessage(err);
+                    const context = ProtectedCall{
+                        .dest_reg = dest_reg,
+                        .expected_results = effective_expected,
+                        .result_base = arg_start,
+                        .scope_depth = vm.scopes.items.len,
+                        .call_frame_index = vm.call_stack.items.len,
+                        .arg_count = target_arg_count,
+                    };
+                    const final_count = try vm.finalizeProtectedFailure(context, message);
+                    return NativeCallResult{ .last_result_count = final_count, .advance_pc = true };
+                };
+
+                const final_count = try vm.finalizeProtectedSuccess(context_index, outcome.last_result_count);
+                return NativeCallResult{ .last_result_count = final_count, .advance_pc = true };
+            },
+            else => {
+                const message = try vm.createStringValue("attempt to call non-function");
+                const context = ProtectedCall{
+                    .dest_reg = dest_reg,
+                    .expected_results = effective_expected,
+                    .result_base = arg_start,
+                    .scope_depth = vm.scopes.items.len,
+                    .call_frame_index = vm.call_stack.items.len,
+                    .arg_count = target_arg_count,
+                };
+                const final_count = try vm.finalizeProtectedFailure(context, message);
+                return NativeCallResult{ .last_result_count = final_count, .advance_pc = true };
+            },
+        }
+    }
+
+    fn builtin_error_native(
+        _: ?*anyopaque,
+        vm_ptr: *anyopaque,
+        _: u16,
+        arg_start: u16,
+        arg_count: u16,
+        _: u16,
+    ) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+
+        const message = if (arg_count > 0)
+            try vm.copyValue(vm.registers[@as(usize, arg_start)])
+        else
+            try vm.createStringValue("error");
+
+        return vm.abortProtectedCallWithMessage(message);
     }
 
     pub fn registerBuiltins(vm: *VM) !void {
@@ -3208,6 +4601,9 @@ pub const BuiltinFunctions = struct {
             .{ .name = "toLowerCase", .func = &builtin_toLowerCase },
             .{ .name = "upper", .func = &builtin_toUpperCase },
             .{ .name = "lower", .func = &builtin_toLowerCase },
+            .{ .name = "sub", .func = &builtin_sub },
+            .{ .name = "gsub", .func = &builtin_gsub },
+            .{ .name = "format", .func = &builtin_format },
             .{ .name = "push", .func = &builtin_push },
             .{ .name = "pop", .func = &builtin_pop },
             .{ .name = "insert", .func = &builtin_insert },
@@ -3224,6 +4620,16 @@ pub const BuiltinFunctions = struct {
 
             const name_copy = try vm.allocator.dupe(u8, builtin.name);
             try vm.globals.put(name_copy, .{ .function = builtin.func });
+        }
+
+        if (vm.engine.globals.get("pcall") == null and vm.globals.get("pcall") == null) {
+            const name_copy = try vm.allocator.dupe(u8, "pcall");
+            try vm.globals.put(name_copy, .{ .native_function = .{ .context = null, .call = builtin_pcall_native } });
+        }
+
+        if (vm.engine.globals.get("error") == null and vm.globals.get("error") == null) {
+            const name_copy = try vm.allocator.dupe(u8, "error");
+            try vm.globals.put(name_copy, .{ .native_function = .{ .context = null, .call = builtin_error_native } });
         }
     }
 };
@@ -3449,6 +4855,7 @@ pub const Parser = struct {
         params_registered: bool,
         pending_params: std.ArrayListUnmanaged([]const u8),
         capture_names: std.ArrayListUnmanaged([]const u8),
+        is_vararg: bool,
 
         fn init(base_scope_depth: usize) FunctionContext {
             return .{
@@ -3456,6 +4863,7 @@ pub const Parser = struct {
                 .params_registered = false,
                 .pending_params = .{},
                 .capture_names = .{},
+                .is_vararg = false,
             };
         }
 
@@ -3610,7 +5018,7 @@ pub const Parser = struct {
         try instructions.append(self.allocator, .{ .opcode = .begin_scope, .operands = [_]u16{ 0, 0, 0 } });
         self.scope_depth += 1;
 
-    const binding = ScopeBinding.init(self.function_stack.items.len);
+        const binding = ScopeBinding.init(self.function_stack.items.len);
         try self.scope_bindings.append(self.allocator, binding);
 
         if (self.function_stack.items.len > 0) {
@@ -3821,6 +5229,11 @@ pub const Parser = struct {
                 return try self.parseReturnStatement(constants, instructions);
             } else if (std.mem.eql(u8, ident, "local")) {
                 self.skipWhitespace();
+                if (self.peekKeyword("function")) {
+                    _ = self.matchKeyword("function");
+                    self.skipWhitespace();
+                    return try self.parseLocalFunctionDeclaration(constants, instructions);
+                }
                 return try self.parseLocalDeclaration(constants, instructions);
             } else if (std.mem.eql(u8, ident, "var")) {
                 self.skipWhitespace();
@@ -3964,7 +5377,7 @@ pub const Parser = struct {
 
     fn parseForStatement(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction)) anyerror!u16 {
         self.skipWhitespace();
-    const first_name = try self.parseIdent();
+        const first_name = try self.parseIdent();
 
         self.skipWhitespace();
         if (self.peek() == '=') {
@@ -4057,9 +5470,9 @@ pub const Parser = struct {
         try self.appendBeginScope(instructions);
         loop_ctx.loop_scope_base = self.scope_depth;
 
-    try self.registerLocalCopy(iter_name);
-    try self.registerLocalCopy(limit_name);
-    try self.registerLocalCopy(step_name);
+        try self.registerLocalCopy(iter_name);
+        try self.registerLocalCopy(limit_name);
+        try self.registerLocalCopy(step_name);
 
         try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ start_expr.result_reg, iter_name_idx, 1 } });
         try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ end_expr.result_reg, limit_name_idx, 1 } });
@@ -4153,7 +5566,6 @@ pub const Parser = struct {
         start_expr: ParseResult,
         end_expr: ParseResult,
     ) anyerror!u16 {
-
         const iter_name_idx = @as(u16, @intCast(constants.items.len));
         try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, iter_name) });
 
@@ -4168,8 +5580,8 @@ pub const Parser = struct {
         try self.appendBeginScope(instructions);
         loop_ctx.loop_scope_base = self.scope_depth;
 
-    try self.registerLocalCopy(iter_name);
-    try self.registerLocalCopy(end_name);
+        try self.registerLocalCopy(iter_name);
+        try self.registerLocalCopy(end_name);
 
         try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ start_expr.result_reg, iter_name_idx, 1 } });
         try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ end_expr.result_reg, end_name_idx, 1 } });
@@ -4232,10 +5644,10 @@ pub const Parser = struct {
         if (var_names.len == 0) return error.ParseError;
         if (var_names.len > 2) return error.ParseError;
 
-    const var_count_u16: u16 = @intCast(var_names.len);
-    const iterator_reg = iter_expr.result_reg;
-    const cond_reg = iter_expr.next_reg;
-    const unpack_base: u16 = cond_reg + 1;
+        const var_count_u16: u16 = @intCast(var_names.len);
+        const iterator_reg = iter_expr.result_reg;
+        const cond_reg = iter_expr.next_reg;
+        const unpack_base: u16 = cond_reg + 1;
 
         const loop_setup_idx = instructions.items.len;
         var loop_ctx = try self.pushLoop(loop_setup_idx, loop_setup_idx, cond_reg);
@@ -4342,47 +5754,56 @@ pub const Parser = struct {
         return body_result;
     }
 
-    fn parseFunctionDeclaration(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction)) anyerror!u16 {
-        const func_name = try self.parseIdent();
-        defer self.allocator.free(func_name);
-
+    fn parseFunctionParameters(self: *Parser, params: *std.ArrayListUnmanaged([]const u8)) anyerror!bool {
         self.skipWhitespace();
         try self.expect('(');
         self.skipWhitespace();
 
-        var params = std.ArrayListUnmanaged([]const u8){};
-        errdefer {
-            var idx: usize = 0;
-            while (idx < params.items.len) : (idx += 1) {
-                self.allocator.free(params.items[idx]);
-            }
-            params.deinit(self.allocator);
-        }
+        var saw_vararg = false;
 
         if (self.peek() != ')') {
             while (true) {
+                if (self.matchOperator("...")) {
+                    saw_vararg = true;
+                    self.skipWhitespace();
+                    if (self.peek() == ',') return error.ParseError;
+                    break;
+                }
+
                 const param_name = try self.parseIdent();
                 try params.append(self.allocator, param_name);
                 self.skipWhitespace();
+
                 if (self.peek() == ',') {
                     self.advance();
                     self.skipWhitespace();
-                } else {
-                    break;
+                    if (self.peek() == ')') return error.ParseError;
+                    continue;
                 }
+                break;
             }
         }
+
         try self.expect(')');
 
-        self.skipWhitespace();
+        return saw_vararg;
+    }
 
+    fn emitFunctionLiteral(
+        self: *Parser,
+        constants: *std.ArrayListUnmanaged(ScriptValue),
+        instructions: *std.ArrayListUnmanaged(Instruction),
+        params: *std.ArrayListUnmanaged([]const u8),
+        is_vararg: bool,
+    ) anyerror!u16 {
         const jump_over_idx = instructions.items.len;
         try instructions.append(self.allocator, .{ .opcode = .jump, .operands = [_]u16{ 0, 0, 0 } });
 
         const body_start_idx = instructions.items.len;
 
         const ctx_index = self.function_stack.items.len;
-        const new_ctx = FunctionContext.init(self.scope_depth);
+        var new_ctx = FunctionContext.init(self.scope_depth);
+        new_ctx.is_vararg = is_vararg;
         try self.function_stack.append(self.allocator, new_ctx);
         errdefer {
             var ctx = &self.function_stack.items[self.function_stack.items.len - 1];
@@ -4392,6 +5813,7 @@ pub const Parser = struct {
 
         {
             var ctx = &self.function_stack.items[self.function_stack.items.len - 1];
+            ctx.is_vararg = is_vararg;
             for (params.items) |param_name| {
                 try ctx.addPendingParam(self.allocator, param_name);
             }
@@ -4409,10 +5831,9 @@ pub const Parser = struct {
         const default_reg: u16 = if (body_result != 0) body_result else 0;
         const nil_const_idx: u16 = 0;
         try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ default_reg, nil_const_idx, 0 } });
-    try instructions.append(self.allocator, .{ .opcode = .return_value, .operands = [_]u16{ default_reg, 1, 0 } });
+        try instructions.append(self.allocator, .{ .opcode = .return_value, .operands = [_]u16{ default_reg, 1, 0 } });
 
         const body_end_idx = instructions.items.len;
-
         instructions.items[jump_over_idx].operands[0] = @as(u16, @intCast(body_end_idx));
 
         var fn_ctx = &self.function_stack.items[self.function_stack.items.len - 1];
@@ -4421,7 +5842,8 @@ pub const Parser = struct {
         self.function_stack.items.len = ctx_index;
 
         const owned_params = try params.toOwnedSlice(self.allocator);
-        params = .{};
+        params.*.deinit(self.allocator);
+        params.* = .{};
         defer {
             for (owned_params) |param| {
                 self.allocator.free(param);
@@ -4436,9 +5858,35 @@ pub const Parser = struct {
         }
 
         const script_func = try ScriptFunction.init(self.allocator, body_start_idx, body_end_idx, owned_params, capture_names);
+        script_func.markVarArg(is_vararg);
         errdefer script_func.release();
+
         const func_const_idx = @as(u16, @intCast(constants.items.len));
         try constants.append(self.allocator, .{ .script_function = script_func });
+
+        return func_const_idx;
+    }
+
+    fn parseFunctionDeclaration(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction)) anyerror!u16 {
+        const func_name = try self.parseIdent();
+        defer self.allocator.free(func_name);
+
+        var params = std.ArrayListUnmanaged([]const u8){};
+        var params_cleanup = true;
+        errdefer if (params_cleanup) {
+            var idx: usize = 0;
+            while (idx < params.items.len) : (idx += 1) {
+                self.allocator.free(params.items[idx]);
+            }
+            params.deinit(self.allocator);
+        };
+
+        const is_vararg = try self.parseFunctionParameters(&params);
+
+        self.skipWhitespace();
+
+        const func_const_idx = try self.emitFunctionLiteral(constants, instructions, &params, is_vararg);
+        params_cleanup = false;
 
         const target_reg: u16 = 0;
         try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ target_reg, func_const_idx, 0 } });
@@ -4448,6 +5896,60 @@ pub const Parser = struct {
         try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ target_reg, name_const_idx, 1 } });
 
         return target_reg;
+    }
+
+    fn parseLocalFunctionDeclaration(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction)) anyerror!u16 {
+        const func_name = try self.parseIdent();
+        defer self.allocator.free(func_name);
+
+        var params = std.ArrayListUnmanaged([]const u8){};
+        var params_cleanup = true;
+        errdefer if (params_cleanup) {
+            var idx: usize = 0;
+            while (idx < params.items.len) : (idx += 1) {
+                self.allocator.free(params.items[idx]);
+            }
+            params.deinit(self.allocator);
+        };
+
+        const is_vararg = try self.parseFunctionParameters(&params);
+
+        try self.registerLocalCopy(func_name);
+
+        self.skipWhitespace();
+
+        const func_const_idx = try self.emitFunctionLiteral(constants, instructions, &params, is_vararg);
+        params_cleanup = false;
+
+        const target_reg: u16 = 0;
+        try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ target_reg, func_const_idx, 0 } });
+
+        const name_const_idx = @as(u16, @intCast(constants.items.len));
+        try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, func_name) });
+        try instructions.append(self.allocator, .{ .opcode = .store_global, .operands = [_]u16{ target_reg, name_const_idx, 2 } });
+
+        return target_reg;
+    }
+
+    fn parseFunctionExpression(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction), reg: u16) anyerror!ParseResult {
+        var params = std.ArrayListUnmanaged([]const u8){};
+        var params_cleanup = true;
+        errdefer if (params_cleanup) {
+            var idx: usize = 0;
+            while (idx < params.items.len) : (idx += 1) {
+                self.allocator.free(params.items[idx]);
+            }
+            params.deinit(self.allocator);
+        };
+
+        const is_vararg = try self.parseFunctionParameters(&params);
+
+        const func_const_idx = try self.emitFunctionLiteral(constants, instructions, &params, is_vararg);
+        params_cleanup = false;
+
+        try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ reg, func_const_idx, 0 } });
+
+        return .{ .result_reg = reg, .next_reg = reg + 1 };
     }
 
     fn parseReturnStatement(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction)) anyerror!u16 {
@@ -4877,6 +6379,20 @@ pub const Parser = struct {
             return try self.parseTableLiteral(constants, instructions, reg);
         }
 
+        if (self.peekKeyword("function")) {
+            _ = self.matchKeyword("function");
+            return try self.parseFunctionExpression(constants, instructions, reg);
+        }
+
+        if (self.matchOperator("...")) {
+            if (self.function_stack.items.len == 0) return error.ParseError;
+            const ctx = &self.function_stack.items[self.function_stack.items.len - 1];
+            if (!ctx.is_vararg) return error.ParseError;
+            const instr_idx = instructions.items.len;
+            try instructions.append(self.allocator, .{ .opcode = .vararg_collect, .operands = [_]u16{ reg, 0, 0 }, .extra = 1 });
+            return .{ .result_reg = reg, .next_reg = reg + 1, .value_count = 1, .call_instr_index = instr_idx };
+        }
+
         if (self.peek() == '"') {
             const str_value = try self.parseStringLiteral();
             const const_idx = @as(u16, @intCast(constants.items.len));
@@ -4959,7 +6475,7 @@ pub const Parser = struct {
                     try constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, method_name) });
                     const method_reg = current.next_reg;
                     const object_reg = current.result_reg;
-                    try instructions.append(self.allocator, .{ .opcode = .load_global, .operands = [_]u16{ method_reg, key_idx, 0 } });
+                    try instructions.append(self.allocator, .{ .opcode = .resolve_method, .operands = [_]u16{ method_reg, object_reg, key_idx } });
                     current = .{ .result_reg = method_reg, .next_reg = method_reg + 1, .self_reg = object_reg };
                 },
                 '(' => {
