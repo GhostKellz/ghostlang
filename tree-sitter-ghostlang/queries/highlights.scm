@@ -31,11 +31,6 @@
 
 ; Operators - C-style and Lua-style
 [
-  "="
-  "+="
-  "-="
-  "*="
-  "/="
   "+"
   "-"
   "*"
@@ -55,6 +50,10 @@
   ":"
   ".."
 ] @operator
+
+; Assignment operators (shown as string in AST due to aliasing)
+(assignment_expression
+  operator: (string) @operator)
 
 ; Punctuation
 [

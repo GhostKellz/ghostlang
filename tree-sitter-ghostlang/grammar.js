@@ -19,7 +19,6 @@ module.exports = grammar({
       $.return_statement,
       $.break_statement,
       $.continue_statement,
-      $.empty_statement,
       $.comment
     )),
 
@@ -104,7 +103,20 @@ module.exports = grammar({
 
     // Lua-style block: statements ... end
     lua_block: $ => seq(
-      repeat($.statement),
+      repeat(choice(
+        $.variable_declaration,
+        $.local_variable_declaration,
+        $.function_declaration,
+        $.local_function_declaration,
+        $.if_statement,
+        $.while_statement,
+        $.for_statement,
+        $.repeat_statement,
+        $.expression_statement,
+        $.return_statement,
+        $.break_statement,
+        $.continue_statement
+      )),
       'end'
     ),
 
@@ -150,16 +162,55 @@ module.exports = grammar({
         'if',
         field('condition', $._expression_base),
         'then',
-        repeat($.statement),
+        repeat(choice(
+          $.variable_declaration,
+          $.local_variable_declaration,
+          $.function_declaration,
+          $.local_function_declaration,
+          $.if_statement,
+          $.while_statement,
+          $.for_statement,
+          $.repeat_statement,
+          $.expression_statement,
+          $.return_statement,
+          $.break_statement,
+          $.continue_statement
+        )),
         repeat(seq(
           'elseif',
           field('elseif_condition', $._expression_base),
           'then',
-          repeat($.statement)
+          repeat(choice(
+            $.variable_declaration,
+            $.local_variable_declaration,
+            $.function_declaration,
+            $.local_function_declaration,
+            $.if_statement,
+            $.while_statement,
+            $.for_statement,
+            $.repeat_statement,
+            $.expression_statement,
+            $.return_statement,
+            $.break_statement,
+            $.continue_statement
+          ))
         )),
         optional(seq(
           'else',
-          repeat($.statement)
+          repeat(choice(
+            $.variable_declaration,
+            $.local_variable_declaration,
+            $.function_declaration,
+            $.local_function_declaration,
+            $.if_statement,
+            $.while_statement,
+            $.for_statement,
+            $.repeat_statement,
+            $.expression_statement,
+            $.return_statement,
+            $.break_statement,
+            $.continue_statement
+          ))
         )),
         'end'
       )
@@ -192,7 +243,20 @@ module.exports = grammar({
         'while',
         field('condition', $._expression_base),
         'do',
-        repeat($.statement),
+        repeat(choice(
+          $.variable_declaration,
+          $.local_variable_declaration,
+          $.function_declaration,
+          $.local_function_declaration,
+          $.if_statement,
+          $.while_statement,
+          $.for_statement,
+          $.repeat_statement,
+          $.expression_statement,
+          $.return_statement,
+          $.break_statement,
+          $.continue_statement
+        )),
         'end'
       )
     ),
@@ -200,7 +264,20 @@ module.exports = grammar({
     // Repeat-until statement (Lua-style only)
     repeat_statement: $ => seq(
       'repeat',
-      repeat($.statement),
+      repeat(choice(
+        $.variable_declaration,
+        $.local_variable_declaration,
+        $.function_declaration,
+        $.local_function_declaration,
+        $.if_statement,
+        $.while_statement,
+        $.for_statement,
+        $.repeat_statement,
+        $.expression_statement,
+        $.return_statement,
+        $.break_statement,
+        $.continue_statement
+      )),
       'until',
       field('condition', $._expression_base)
     ),
@@ -251,7 +328,20 @@ module.exports = grammar({
         field('end', $._expression_base),
         optional(seq(',', field('step', $._expression_base))),
         'do',
-        repeat($.statement),
+        repeat(choice(
+          $.variable_declaration,
+          $.local_variable_declaration,
+          $.function_declaration,
+          $.local_function_declaration,
+          $.if_statement,
+          $.while_statement,
+          $.for_statement,
+          $.repeat_statement,
+          $.expression_statement,
+          $.return_statement,
+          $.break_statement,
+          $.continue_statement
+        )),
         'end'
       ),
       // Lua-style generic for: for k, v in pairs(t) do ... end
@@ -264,7 +354,20 @@ module.exports = grammar({
         'in',
         field('iterator', $._expression_base),
         'do',
-        repeat($.statement),
+        repeat(choice(
+          $.variable_declaration,
+          $.local_variable_declaration,
+          $.function_declaration,
+          $.local_function_declaration,
+          $.if_statement,
+          $.while_statement,
+          $.for_statement,
+          $.repeat_statement,
+          $.expression_statement,
+          $.return_statement,
+          $.break_statement,
+          $.continue_statement
+        )),
         'end'
       )
     )),
@@ -298,7 +401,6 @@ module.exports = grammar({
         $.expression_statement,
         $.block_statement,
         $.return_statement,
-        $.empty_statement,
         $.comment
       )),
       '}'
@@ -337,7 +439,7 @@ module.exports = grammar({
     assignment_expression: $ => prec.right(1, choice(
       seq(
         field('left', $._expression_base),
-        field('operator', choice('=', '+=', '-=', '*=', '/=')),
+        field('operator', alias(choice('=', '+=', '-=', '*=', '/='), $.string)),
         field('right', $._expression_base)
       ),
       seq(
