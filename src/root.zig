@@ -4980,6 +4980,7 @@ pub const Parser = struct {
         try instructions.append(self.allocator, .{ .opcode = .load_const, .operands = [_]u16{ 0, nil_const_idx, 0 } });
         var last_result_reg: u16 = 0;
 
+        self.skipWhitespace();
         while (self.peek() != null) {
             last_result_reg = try self.parseStatement(&constants, &instructions);
             self.skipWhitespace();
@@ -6844,8 +6845,62 @@ pub const Parser = struct {
     }
 
     fn skipWhitespace(self: *Parser) void {
-        while (self.pos < self.source.len and std.ascii.isWhitespace(self.source[self.pos])) {
-            self.advance();
+        while (self.pos < self.source.len) {
+            const ch = self.source[self.pos];
+            if (std.ascii.isWhitespace(ch)) {
+                self.advance();
+                continue;
+            }
+
+            if (ch == '-' and self.pos + 1 < self.source.len and self.source[self.pos + 1] == '-') {
+                // Consume the comment introducer
+                self.advance();
+                self.advance();
+
+                // Detect Lua-style long comments: --[=[ ... ]=]
+                if (self.peek() == '[') {
+                    var eq_count: usize = 0;
+                    var lookahead = self.pos + 1;
+                    while (lookahead < self.source.len and self.source[lookahead] == '=') : (lookahead += 1) {
+                        eq_count += 1;
+                    }
+                    if (lookahead < self.source.len and self.source[lookahead] == '[') {
+                        // Consume the opening delimiter "[=*["
+                        self.advance(); // initial '['
+                        var consumed: usize = 0;
+                        while (consumed < eq_count) : (consumed += 1) {
+                            self.advance(); // '=' run
+                        }
+                        self.advance(); // final '['
+
+                        // Skip until the matching closing delimiter
+                        while (self.pos < self.source.len) {
+                            if (self.peek() == ']') {
+                                self.advance();
+                                var matched: usize = 0;
+                                while (matched < eq_count and self.peek() == '=') : (matched += 1) {
+                                    self.advance();
+                                }
+                                if (matched == eq_count and self.peek() == ']') {
+                                    self.advance();
+                                    break;
+                                }
+                                continue;
+                            }
+                            self.advance();
+                        }
+                        continue;
+                    }
+                }
+
+                // Fallback: consume until end of line for single-line comments
+                while (self.pos < self.source.len and self.source[self.pos] != '\n') {
+                    self.advance();
+                }
+                continue;
+            }
+
+            break;
         }
     }
 
@@ -7015,6 +7070,28 @@ test "script reassigns existing variable" {
     const result = try script.run();
     try std.testing.expect(result == .number);
     try std.testing.expectEqual(@as(f64, 3), result.number);
+}
+
+test "script parses leading line comment" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\-- Sample plugin header comment
+        \\function setup()
+        \\    return true
+        \\end
+        \\setup()
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .boolean);
+    try std.testing.expect(result.boolean);
 }
 
 test "lua style conditionals with elseif and else" {
