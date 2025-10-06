@@ -1,67 +1,139 @@
 const std = @import("std");
 const ghostlang = @import("ghostlang");
 
+const max_script_size: usize = 4 * 1024 * 1024; // 4 MiB safety cap
+
 pub fn main() !void {
+    var exit_code: u8 = 0;
+    defer if (exit_code != 0) std.process.exit(exit_code);
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const config = ghostlang.EngineConfig{
-        .allocator = allocator,
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+
+    if (args.len < 2) {
+        try printUsage(args[0]);
+        exit_code = 1;
+        return;
+    }
+
+    const script_path = args[1];
+
+    const source = std.fs.cwd().readFileAlloc(
+        script_path,
+        allocator,
+        std.Io.Limit.limited(max_script_size),
+    ) catch |err| {
+        reportIoError(script_path, err) catch {};
+        exit_code = 1;
+        return;
     };
-    var engine = try ghostlang.ScriptEngine.create(config);
+    defer allocator.free(source);
+
+    const config = ghostlang.EngineConfig{ .allocator = allocator };
+    var engine = ghostlang.ScriptEngine.create(config) catch |err| {
+        reportEngineError("Failed to initialize engine", err) catch {};
+        exit_code = 1;
+        return;
+    };
     defer engine.deinit();
 
-    try engine.registerFunction("print", printFunc);
-
-    // Test all new features
-    const test_script =
-        \\var a = 10
-        \\var b = 3
-        \\var mod_result = a % b
-        \\var lte_test = a <= b
-        \\var gte_test = a >= b
-        \\var s = "hello"
-        \\var s_len = len(s)
-        \\var line_count = getLineCount()
-        \\mod_result
-    ;
-
-    // Load and run the script
-    var script = try engine.loadScript(test_script);
-    defer script.deinit();
-    const result = try script.run();
-
-    // Print result
-    std.debug.print("\nFinal result: ", .{});
-    switch (result) {
-        .nil => std.debug.print("nil\n", .{}),
-        .boolean => |b| std.debug.print("{}\n", .{b}),
-        .number => |n| std.debug.print("{d}\n", .{n}),
-        .string => |s| std.debug.print("{s}\n", .{s}),
-        .function => std.debug.print("<function>\n", .{}),
-        .native_function => std.debug.print("<native_function>\n", .{}),
-        .script_function => std.debug.print("<script_function>\n", .{}),
-        .table => std.debug.print("<table>\n", .{}),
-        .array => std.debug.print("<array>\n", .{}),
-        .iterator => std.debug.print("<iterator>\n", .{}),
-        .upvalue => std.debug.print("<upvalue>\n", .{}),
+    if (engine.registerFunction("print", printFunction)) |_| {} else |err| {
+        reportEngineError("Failed to register print function", err) catch {};
+        exit_code = 1;
+        return;
     }
 
-    // Call a script function
-    // const call_result = try engine.call("add", .{1, 2});
-    // std.debug.print("Call result: {}\n", .{call_result});
+    var script = engine.loadScript(source) catch |err| {
+        reportLoadError(&engine, script_path, err) catch {};
+        exit_code = 1;
+        return;
+    };
+    defer script.deinit();
+
+    var result = script.run() catch |err| {
+        reportRuntimeError(&engine, script_path, err) catch {};
+        exit_code = 1;
+        return;
+    };
+    defer result.deinit(engine.tracked_allocator);
+
+    var stdout_file = std.fs.File.stdout();
+    try stdout_file.writeAll("Result: ");
+    try writeValue(stdout_file, result);
+    try stdout_file.writeAll("\n");
 }
 
-fn printFunc(args: []const ghostlang.ScriptValue) ghostlang.ScriptValue {
-    for (args) |arg| {
-        switch (arg) {
-            .number => |n| std.debug.print("{}", .{n}),
-            .string => |s| std.debug.print("{s}", .{s}),
-            else => std.debug.print("{}", .{arg}),
-        }
+fn printUsage(exe_name: []const u8) !void {
+    std.debug.print("Usage: {s} <script.gza>\n", .{exe_name});
+}
+
+fn reportIoError(path: []const u8, err: anyerror) !void {
+    std.debug.print("error: failed to read '{s}': {s}\n", .{ path, @errorName(err) });
+}
+
+fn reportEngineError(msg: []const u8, err: anyerror) !void {
+    std.debug.print("error: {s}: {s}\n", .{ msg, @errorName(err) });
+}
+
+fn reportLoadError(engine: *ghostlang.ScriptEngine, path: []const u8, err: anyerror) !void {
+    std.debug.print("error: failed to load '{s}': {s}\n", .{ path, @errorName(err) });
+    const diagnostics = engine.getDiagnostics();
+    for (diagnostics) |diag| {
+        std.debug.print("  {s}:{d}:{d}: {s}: {s}\n", .{
+            path,
+            diag.line,
+            diag.column,
+            severityLabel(diag.severity),
+            diag.message,
+        });
     }
-    std.debug.print("\n", .{});
+}
+
+fn reportRuntimeError(engine: *ghostlang.ScriptEngine, path: []const u8, err: anyerror) !void {
+    _ = engine;
+    std.debug.print("error: script '{s}' failed: {s}\n", .{ path, @errorName(err) });
+}
+
+fn severityLabel(severity: ghostlang.ParseSeverity) []const u8 {
+    return switch (severity) {
+        .info => "info",
+        .warning => "warning",
+        .fatal => "error",
+    };
+}
+
+fn writeValue(file: std.fs.File, value: ghostlang.ScriptValue) !void {
+    switch (value) {
+        .nil => try file.writeAll("nil"),
+        .boolean => |b| try file.writeAll(if (b) "true" else "false"),
+        .number => |n| {
+            var buf: [64]u8 = undefined;
+            const text = try std.fmt.bufPrint(&buf, "{}", .{n});
+            try file.writeAll(text);
+        },
+        .string => |s| try file.writeAll(s),
+        .function => try file.writeAll("<function>"),
+        .native_function => try file.writeAll("<function>"),
+        .script_function => try file.writeAll("<function>"),
+        .table => try file.writeAll("<table>"),
+        .array => try file.writeAll("<array>"),
+        .iterator => try file.writeAll("<iterator>"),
+        .upvalue => try file.writeAll("<upvalue>"),
+    }
+}
+
+fn printFunction(args: []const ghostlang.ScriptValue) ghostlang.ScriptValue {
+    var stdout_file = std.fs.File.stdout();
+    var index: usize = 0;
+    while (index < args.len) : (index += 1) {
+        if (index > 0) stdout_file.writeAll(" ") catch {};
+        writeValue(stdout_file, args[index]) catch {};
+    }
+    stdout_file.writeAll("\n") catch {};
     return if (args.len > 0) args[0] else .{ .nil = {} };
 }
 

@@ -1,0 +1,6 @@
+// Minimal test - WRONG SYNTAX (what Grim is using)
+const message = "Plugin loaded"
+
+fn setup() {
+    print(message)
+}

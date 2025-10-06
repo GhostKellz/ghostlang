@@ -1,0 +1,11 @@
+-- Test: Correct syntax for Grim plugins
+-- This is what the Grim team should be using
+
+local message = "Plugin loaded"
+
+function setup()
+    print(message)
+end
+
+-- Call the function to test
+setup()

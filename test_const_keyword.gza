@@ -1,0 +1,2 @@
+const message = "Plugin loaded"
+message

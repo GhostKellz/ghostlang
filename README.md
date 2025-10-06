@@ -73,6 +73,41 @@ zig build
 ./zig-out/bin/ghostlang
 ```
 
+### Running Scripts
+
+After building, execute Ghostlang scripts directly from the CLI:
+
+```bash
+./zig-out/bin/ghostlang path/to/script.gza
+```
+
+### Example Plugin Script
+
+Create `plugin.gza`:
+
+```ghostlang
+-- Simple Ghostlang plugin
+var tracker = { count = 0 }
+
+function setup()
+    print("ghostlang plugin activated")
+end
+
+function on_command(name)
+    tracker.count = tracker.count + 1
+    print("command:", name, "invocations:", tracker.count)
+end
+
+setup()
+on_command("demo")
+```
+
+Run it with the CLI:
+
+```bash
+./zig-out/bin/ghostlang plugin.gza
+```
+
 ## File Extension
 
 Scripts use the `.gza` extension (ghostlang zig assembly).

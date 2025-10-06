@@ -1,0 +1,4 @@
+fn setup() {
+    print("hello")
+}
+setup()
