@@ -55,7 +55,7 @@ pub fn main() !void {
     defer script.deinit();
 
     var result = script.run() catch |err| {
-        reportRuntimeError(&engine, script_path, err) catch {};
+        reportRuntimeError(&engine, &script, script_path, err) catch {};
         exit_code = 1;
         return;
     };
@@ -93,9 +93,23 @@ fn reportLoadError(engine: *ghostlang.ScriptEngine, path: []const u8, err: anyer
     }
 }
 
-fn reportRuntimeError(engine: *ghostlang.ScriptEngine, path: []const u8, err: anyerror) !void {
-    _ = engine;
+fn reportRuntimeError(engine: *ghostlang.ScriptEngine, script: ?*ghostlang.Script, path: []const u8, err: anyerror) !void {
     std.debug.print("error: script '{s}' failed: {s}\n", .{ path, @errorName(err) });
+
+    const memory_related = err == ghostlang.ExecutionError.MemoryLimitExceeded or err == ghostlang.ExecutionError.OutOfMemory;
+    if (!memory_related or script == null) return;
+
+    var buffer = std.ArrayList(u8).init(engine.config.allocator);
+    defer buffer.deinit();
+
+    const writer = buffer.writer();
+    const wrote = try script.?.writeMemorySummary(writer);
+    if (!wrote or buffer.items.len == 0) return;
+
+    var stderr = std.io.getStdErr().writer();
+    try stderr.writeAll("  memory context:\n");
+    try stderr.writeAll(buffer.items);
+    try stderr.writeAll("  hint: Investigate the references above; release or reuse these values to prevent leaks.\n");
 }
 
 fn severityLabel(severity: ghostlang.ParseSeverity) []const u8 {
