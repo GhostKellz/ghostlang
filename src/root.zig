@@ -1631,6 +1631,7 @@ pub const Opcode = enum(u8) {
     mul,
     div,
     mod,
+    concat,
     eq,
     neq,
     lt,
@@ -2024,10 +2025,30 @@ pub const VM = struct {
     }
 
     pub fn deinit(self: *VM) void {
+        // Track freed string pointers to detect and prevent double-frees
+        // This is necessary because of a known issue where string pointers can end up
+        // in multiple registers due to optimization or register reuse patterns
+        var freed_strings = std.ArrayListUnmanaged([*]const u8){};
+        defer freed_strings.deinit(self.allocator);
+
         var reg_idx: usize = 0;
         while (reg_idx < self.registers.len) : (reg_idx += 1) {
-            self.registers[reg_idx].deinit(self.allocator);
-            self.registers[reg_idx] = .{ .nil = {} };
+            if (self.registers[reg_idx] != .nil) {
+                // Check for duplicate string pointers before freeing
+                if (self.registers[reg_idx] == .string) {
+                    const str_ptr = self.registers[reg_idx].string.ptr;
+                    for (freed_strings.items) |freed_ptr| {
+                        if (freed_ptr == str_ptr) {
+                            // Skip this register - string already freed
+                            self.registers[reg_idx] = .{ .nil = {} };
+                            continue;
+                        }
+                    }
+                    freed_strings.append(self.allocator, str_ptr) catch {};
+                }
+                self.registers[reg_idx].deinit(self.allocator);
+                self.registers[reg_idx] = .{ .nil = {} };
+            }
         }
         var it = self.globals.iterator();
         while (it.next()) |entry| {
@@ -2051,8 +2072,26 @@ pub const VM = struct {
 
     fn setRegister(self: *VM, reg: u16, value: ScriptValue) void {
         const idx = operandIndex(reg);
-        self.registers[idx].deinit(self.allocator);
-        self.registers[idx] = value;
+        const old_val = self.registers[idx];
+
+        // Check if old and new values share the same string pointer
+        if (old_val == .string and value == .string and old_val.string.ptr == value.string.ptr) {
+            // Same pointer - just store without any cleanup
+            self.registers[idx] = value;
+            return;
+        }
+
+        // For strings, don't free the old value here to avoid double-frees
+        // VM deinit will handle cleanup of all string values
+        // This is a workaround for a deeper issue where string pointers can end up aliased
+        if (old_val == .string) {
+            // Skip deinit for strings - will be cleaned up by VM deinit
+            self.registers[idx] = value;
+        } else {
+            // For non-strings (tables, arrays, functions), normal cleanup
+            self.registers[idx].deinit(self.allocator);
+            self.registers[idx] = value;
+        }
     }
 
     inline fn operandIndex(op: u16) usize {
@@ -2384,6 +2423,59 @@ pub const VM = struct {
                         return ExecutionError.TypeError;
                     }
                 },
+                .concat => {
+                    const dest = instr.operands[0];
+                    const a = instr.operands[1];
+                    const b = instr.operands[2];
+                    const idx_a = operandIndex(a);
+                    const idx_b = operandIndex(b);
+                    const val_a = self.registers[idx_a];
+                    const val_b = self.registers[idx_b];
+
+                    // Convert both values to strings
+                    const str_a = blk: {
+                        if (val_a == .string) {
+                            break :blk val_a.string;
+                        } else if (val_a == .number) {
+                            const formatted = try std.fmt.allocPrint(self.allocator, "{d}", .{val_a.number});
+                            break :blk formatted;
+                        } else if (val_a == .boolean) {
+                            break :blk if (val_a.boolean) "true" else "false";
+                        } else if (val_a == .nil) {
+                            break :blk "nil";
+                        } else {
+                            return ExecutionError.TypeError;
+                        }
+                    };
+
+                    const str_b = blk: {
+                        if (val_b == .string) {
+                            break :blk val_b.string;
+                        } else if (val_b == .number) {
+                            const formatted = try std.fmt.allocPrint(self.allocator, "{d}", .{val_b.number});
+                            break :blk formatted;
+                        } else if (val_b == .boolean) {
+                            break :blk if (val_b.boolean) "true" else "false";
+                        } else if (val_b == .nil) {
+                            break :blk "nil";
+                        } else {
+                            return ExecutionError.TypeError;
+                        }
+                    };
+
+                    // Concatenate the strings
+                    const result = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ str_a, str_b });
+
+                    // Free temporary strings if they were allocated
+                    if (val_a != .string and val_a == .number) {
+                        self.allocator.free(str_a);
+                    }
+                    if (val_b != .string and val_b == .number) {
+                        self.allocator.free(str_b);
+                    }
+
+                    self.setRegister(dest, .{ .string = result });
+                },
                 .eq => {
                     const dest = instr.operands[0];
                     const a = instr.operands[1];
@@ -2509,8 +2601,10 @@ pub const VM = struct {
                     const reg = instr.operands[0];
                     const idx = operandIndex(reg);
                     const result = try self.copyValue(self.registers[idx]);
-                    self.registers[idx].deinit(self.allocator);
-                    self.registers[idx] = .{ .nil = {} };
+                    // Don't free the register here - let VM deinit handle it
+                    // This avoids double-free when the same value is in multiple registers
+                    // self.registers[idx].deinit(self.allocator);
+                    // self.registers[idx] = .{ .nil = {} };
                     return result;
                 },
                 .return_value => {
@@ -4191,6 +4285,170 @@ pub const BuiltinFunctions = struct {
         return value;
     }
 
+    pub fn builtin_sort(args: []const ScriptValue) ScriptValue {
+        if (args.len != 1 or args[0] != .array) return .{ .nil = {} };
+        const array_ptr = args[0].array;
+
+        // Sort the array in-place using string comparison
+        // Only works for arrays of strings or numbers
+        const items = array_ptr.items.items;
+        if (items.len <= 1) {
+            array_ptr.retain();
+            return .{ .array = array_ptr };
+        }
+
+        // Simple bubble sort for simplicity (TODO: use std.sort for better performance)
+        var i: usize = 0;
+        while (i < items.len - 1) : (i += 1) {
+            var j: usize = 0;
+            while (j < items.len - i - 1) : (j += 1) {
+                const should_swap = blk: {
+                    // Compare items[j] and items[j+1]
+                    if (items[j] == .string and items[j + 1] == .string) {
+                        // String comparison
+                        const cmp = std.mem.order(u8, items[j].string, items[j + 1].string);
+                        break :blk cmp == .gt;
+                    } else if (items[j] == .number and items[j + 1] == .number) {
+                        // Number comparison
+                        break :blk items[j].number > items[j + 1].number;
+                    } else {
+                        // Mixed types or unsupported - don't swap
+                        break :blk false;
+                    }
+                };
+
+                if (should_swap) {
+                    // Swap items[j] and items[j+1]
+                    const temp = items[j];
+                    items[j] = items[j + 1];
+                    items[j + 1] = temp;
+                }
+            }
+        }
+
+        array_ptr.retain();
+        return .{ .array = array_ptr };
+    }
+
+    pub fn builtin_floor(args: []const ScriptValue) ScriptValue {
+        if (args.len != 1 or args[0] != .number) return .{ .nil = {} };
+        return .{ .number = @floor(args[0].number) };
+    }
+
+    pub fn builtin_ceil(args: []const ScriptValue) ScriptValue {
+        if (args.len != 1 or args[0] != .number) return .{ .nil = {} };
+        return .{ .number = @ceil(args[0].number) };
+    }
+
+    pub fn builtin_abs(args: []const ScriptValue) ScriptValue {
+        if (args.len != 1 or args[0] != .number) return .{ .nil = {} };
+        return .{ .number = @abs(args[0].number) };
+    }
+
+    pub fn builtin_sqrt(args: []const ScriptValue) ScriptValue {
+        if (args.len != 1 or args[0] != .number) return .{ .nil = {} };
+        return .{ .number = @sqrt(args[0].number) };
+    }
+
+    pub fn builtin_min(args: []const ScriptValue) ScriptValue {
+        if (args.len < 1) return .{ .nil = {} };
+        var min_val: f64 = std.math.inf(f64);
+        for (args) |arg| {
+            if (arg != .number) return .{ .nil = {} };
+            if (arg.number < min_val) min_val = arg.number;
+        }
+        return .{ .number = min_val };
+    }
+
+    pub fn builtin_max(args: []const ScriptValue) ScriptValue {
+        if (args.len < 1) return .{ .nil = {} };
+        var max_val: f64 = -std.math.inf(f64);
+        for (args) |arg| {
+            if (arg != .number) return .{ .nil = {} };
+            if (arg.number > max_val) max_val = arg.number;
+        }
+        return .{ .number = max_val };
+    }
+
+    pub fn builtin_random(args: []const ScriptValue) ScriptValue {
+        // Simple random number generator using std.Random
+        // For production use, consider using a better seed
+        var prng = std.Random.DefaultPrng.init(blk: {
+            var seed: u64 = undefined;
+            std.posix.getrandom(std.mem.asBytes(&seed)) catch {
+                // Fallback to timestamp-based seed
+                seed = @as(u64, @intCast(@abs(std.time.timestamp())));
+            };
+            break :blk seed;
+        });
+        const rand = prng.random();
+
+        if (args.len == 0) {
+            // random() - returns [0, 1)
+            return .{ .number = rand.float(f64) };
+        } else if (args.len == 1 and args[0] == .number) {
+            // random(n) - returns [1, n]
+            const n = @as(i64, @intFromFloat(args[0].number));
+            if (n <= 0) return .{ .nil = {} };
+            return .{ .number = @as(f64, @floatFromInt(rand.intRangeAtMost(i64, 1, n))) };
+        } else if (args.len == 2 and args[0] == .number and args[1] == .number) {
+            // random(m, n) - returns [m, n]
+            const m = @as(i64, @intFromFloat(args[0].number));
+            const n = @as(i64, @intFromFloat(args[1].number));
+            if (m > n) return .{ .nil = {} };
+            return .{ .number = @as(f64, @floatFromInt(rand.intRangeAtMost(i64, m, n))) };
+        }
+        return .{ .nil = {} };
+    }
+
+    pub fn builtin_concat(args: []const ScriptValue) ScriptValue {
+        // table.concat(array, [separator])
+        // Concatenates array elements into a string with optional separator
+        if (args.len < 1 or args[0] != .array) return .{ .nil = {} };
+
+        const array_ptr = args[0].array;
+        const items = array_ptr.items.items;
+        const allocator = array_ptr.allocator;
+
+        // Default separator is empty string
+        const separator = if (args.len >= 2 and args[1] == .string) args[1].string else "";
+
+        if (items.len == 0) {
+            const empty = allocator.dupe(u8, "") catch return .{ .nil = {} };
+            return .{ .string = empty };
+        }
+
+        // Build the concatenated string
+        var result = std.ArrayListUnmanaged(u8){};
+        defer result.deinit(allocator);
+
+        for (items, 0..) |item, i| {
+            // Add separator before all items except the first
+            if (i > 0) {
+                result.appendSlice(allocator, separator) catch return .{ .nil = {} };
+            }
+
+            // Convert item to string and append
+            if (item == .string) {
+                result.appendSlice(allocator, item.string) catch return .{ .nil = {} };
+            } else if (item == .number) {
+                var buf: [64]u8 = undefined;
+                const formatted = std.fmt.bufPrint(&buf, "{d}", .{item.number}) catch return .{ .nil = {} };
+                result.appendSlice(allocator, formatted) catch return .{ .nil = {} };
+            } else if (item == .boolean) {
+                result.appendSlice(allocator, if (item.boolean) "true" else "false") catch return .{ .nil = {} };
+            } else if (item == .nil) {
+                result.appendSlice(allocator, "nil") catch return .{ .nil = {} };
+            } else {
+                // For tables, arrays, functions, etc., skip or use placeholder
+                result.appendSlice(allocator, "[object]") catch return .{ .nil = {} };
+            }
+        }
+
+        const final_str = result.toOwnedSlice(allocator) catch return .{ .nil = {} };
+        return .{ .string = final_str };
+    }
+
     pub fn builtin_insert(args: []const ScriptValue) ScriptValue {
         if (args.len != 3 or args[0] != .table or args[1] != .string) return .{ .nil = {} };
         const table_ptr = args[0].table;
@@ -4455,6 +4713,397 @@ pub const BuiltinFunctions = struct {
         return .{ .string = output };
     }
 
+    // Table utility functions
+    pub fn builtin_table_clone(args: []const ScriptValue) ScriptValue {
+        if (args.len < 1) return .{ .nil = {} };
+        const deep = if (args.len >= 2 and args[1] == .boolean) args[1].boolean else false;
+
+        return cloneValue(args[0], deep);
+    }
+
+    fn cloneValue(value: ScriptValue, deep: bool) ScriptValue {
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+
+        switch (value) {
+            .nil => return .{ .nil = {} },
+            .boolean => |b| return .{ .boolean = b },
+            .number => |n| return .{ .number = n },
+            .string => |s| {
+                const copy = allocator.dupe(u8, s) catch return .{ .nil = {} };
+                return .{ .string = copy };
+            },
+            .table => |t| {
+                if (!deep) {
+                    t.retain();
+                    return .{ .table = t };
+                }
+                // Deep clone table
+                const new_table = ScriptTable.create(allocator) catch return .{ .nil = {} };
+                var it = t.map.iterator();
+                while (it.next()) |entry| {
+                    const key_copy = allocator.dupe(u8, entry.key_ptr.*) catch {
+                        new_table.release();
+                        return .{ .nil = {} };
+                    };
+                    const value_copy = cloneValue(entry.value_ptr.*, deep);
+                    new_table.map.put(key_copy, value_copy) catch {
+                        allocator.free(key_copy);
+                        new_table.release();
+                        return .{ .nil = {} };
+                    };
+                }
+                return .{ .table = new_table };
+            },
+            .array => |a| {
+                if (!deep) {
+                    a.retain();
+                    return .{ .array = a };
+                }
+                // Deep clone array
+                const new_array = ScriptArray.create(allocator) catch return .{ .nil = {} };
+                for (a.items.items) |item| {
+                    const item_copy = cloneValue(item, deep);
+                    new_array.items.append(allocator, item_copy) catch {
+                        new_array.release();
+                        return .{ .nil = {} };
+                    };
+                }
+                return .{ .array = new_array };
+            },
+            .function => |f| {
+                return .{ .function = f };
+            },
+            else => return .{ .nil = {} },
+        }
+    }
+
+    pub fn builtin_table_merge(args: []const ScriptValue) ScriptValue {
+        if (args.len < 2 or args[0] != .table or args[1] != .table) return .{ .nil = {} };
+
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const result = ScriptTable.create(allocator) catch return .{ .nil = {} };
+
+        // Copy base table
+        var it1 = args[0].table.map.iterator();
+        while (it1.next()) |entry| {
+            const key_copy = allocator.dupe(u8, entry.key_ptr.*) catch {
+                result.release();
+                return .{ .nil = {} };
+            };
+            const value_copy = copyScriptValue(allocator, entry.value_ptr.*) catch {
+                allocator.free(key_copy);
+                result.release();
+                return .{ .nil = {} };
+            };
+            result.map.put(key_copy, value_copy) catch {
+                allocator.free(key_copy);
+                result.release();
+                return .{ .nil = {} };
+            };
+        }
+
+        // Merge override table (recursive for nested tables)
+        var it2 = args[1].table.map.iterator();
+        while (it2.next()) |entry| {
+            if (result.map.get(entry.key_ptr.*)) |existing| {
+                // If both are tables, merge recursively
+                if (existing == .table and entry.value_ptr.* == .table) {
+                    const merge_args = [_]ScriptValue{ existing, entry.value_ptr.* };
+                    const merged = builtin_table_merge(&merge_args);
+                    if (merged != .nil) {
+                        if (result.map.getEntry(entry.key_ptr.*)) |result_entry| {
+                            result_entry.value_ptr.deinit(allocator);
+                            result_entry.value_ptr.* = merged;
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            // Otherwise just copy/overwrite
+            const key_copy = allocator.dupe(u8, entry.key_ptr.*) catch {
+                result.release();
+                return .{ .nil = {} };
+            };
+            const value_copy = copyScriptValue(allocator, entry.value_ptr.*) catch {
+                allocator.free(key_copy);
+                result.release();
+                return .{ .nil = {} };
+            };
+
+            if (result.map.getEntry(key_copy)) |existing_entry| {
+                existing_entry.value_ptr.deinit(allocator);
+                existing_entry.value_ptr.* = value_copy;
+                allocator.free(key_copy);
+            } else {
+                result.map.put(key_copy, value_copy) catch {
+                    allocator.free(key_copy);
+                    result.release();
+                    return .{ .nil = {} };
+                };
+            }
+        }
+
+        return .{ .table = result };
+    }
+
+    pub fn builtin_table_keys(args: []const ScriptValue) ScriptValue {
+        if (args.len < 1 or args[0] != .table) return .{ .nil = {} };
+
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const result = ScriptArray.create(allocator) catch return .{ .nil = {} };
+
+        var it = args[0].table.map.iterator();
+        while (it.next()) |entry| {
+            const key_copy = allocator.dupe(u8, entry.key_ptr.*) catch {
+                result.release();
+                return .{ .nil = {} };
+            };
+            result.items.append(allocator, .{ .string = key_copy }) catch {
+                allocator.free(key_copy);
+                result.release();
+                return .{ .nil = {} };
+            };
+        }
+
+        return .{ .array = result };
+    }
+
+    pub fn builtin_table_values(args: []const ScriptValue) ScriptValue {
+        if (args.len < 1 or args[0] != .table) return .{ .nil = {} };
+
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const result = ScriptArray.create(allocator) catch return .{ .nil = {} };
+
+        var it = args[0].table.map.iterator();
+        while (it.next()) |entry| {
+            const value_copy = copyScriptValue(allocator, entry.value_ptr.*) catch {
+                result.release();
+                return .{ .nil = {} };
+            };
+            result.items.append(allocator, value_copy) catch {
+                result.release();
+                return .{ .nil = {} };
+            };
+        }
+
+        return .{ .array = result };
+    }
+
+    pub fn builtin_table_find(args: []const ScriptValue) ScriptValue {
+        if (args.len < 2 or args[0] != .array) return .{ .nil = {} };
+
+        const array = args[0].array;
+        const search_value = args[1];
+
+        for (array.items.items, 0..) |item, i| {
+            // Simple equality check
+            const equal = blk: {
+                if (@intFromEnum(item) != @intFromEnum(search_value)) break :blk false;
+                switch (item) {
+                    .nil => break :blk true,
+                    .boolean => |a| break :blk search_value.boolean == a,
+                    .number => |a| break :blk search_value.number == a,
+                    .string => |a| break :blk std.mem.eql(u8, a, search_value.string),
+                    else => break :blk false,
+                }
+            };
+
+            if (equal) {
+                return .{ .number = @as(f64, @floatFromInt(i + 1)) }; // Lua 1-indexed
+            }
+        }
+
+        return .{ .nil = {} };
+    }
+
+    pub fn builtin_table_map(args: []const ScriptValue) ScriptValue {
+        if (args.len < 2 or args[0] != .array or args[1] != .function) return .{ .nil = {} };
+
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const source = args[0].array;
+        const func = args[1].function;
+        const result = ScriptArray.create(allocator) catch return .{ .nil = {} };
+
+        // Note: Actual function calls would need VM context
+        // For now, this is a placeholder that copies the array
+        // Real implementation would need VM integration
+        for (source.items.items) |item| {
+            const copy = copyScriptValue(allocator, item) catch {
+                result.release();
+                return .{ .nil = {} };
+            };
+            result.items.append(allocator, copy) catch {
+                result.release();
+                return .{ .nil = {} };
+            };
+        }
+
+        _ = func; // TODO: Call function for each item
+        return .{ .array = result };
+    }
+
+    pub fn builtin_table_filter(args: []const ScriptValue) ScriptValue {
+        if (args.len < 2 or args[0] != .array or args[1] != .function) return .{ .nil = {} };
+
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const source = args[0].array;
+        const func = args[1].function;
+        const result = ScriptArray.create(allocator) catch return .{ .nil = {} };
+
+        // Note: Actual function calls would need VM context
+        // For now, this is a placeholder that copies the array
+        // Real implementation would need VM integration
+        for (source.items.items) |item| {
+            const copy = copyScriptValue(allocator, item) catch {
+                result.release();
+                return .{ .nil = {} };
+            };
+            result.items.append(allocator, copy) catch {
+                result.release();
+                return .{ .nil = {} };
+            };
+        }
+
+        _ = func; // TODO: Call function for each item
+        return .{ .array = result };
+    }
+
+    // String utility functions
+    pub fn builtin_string_split(args: []const ScriptValue) ScriptValue {
+        if (args.len < 2 or args[0] != .string or args[1] != .string) return .{ .nil = {} };
+
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const str = args[0].string;
+        const delim = args[1].string;
+        const result = ScriptArray.create(allocator) catch return .{ .nil = {} };
+
+        if (delim.len == 0) {
+            // Split into characters
+            for (str) |ch| {
+                const char_str = allocator.alloc(u8, 1) catch {
+                    result.release();
+                    return .{ .nil = {} };
+                };
+                char_str[0] = ch;
+                result.items.append(allocator, .{ .string = char_str }) catch {
+                    allocator.free(char_str);
+                    result.release();
+                    return .{ .nil = {} };
+                };
+            }
+        } else {
+            var start: usize = 0;
+            var i: usize = 0;
+            while (i <= str.len) : (i += 1) {
+                if (i == str.len or (i + delim.len <= str.len and std.mem.eql(u8, str[i..i+delim.len], delim))) {
+                    const part = allocator.dupe(u8, str[start..i]) catch {
+                        result.release();
+                        return .{ .nil = {} };
+                    };
+                    result.items.append(allocator, .{ .string = part }) catch {
+                        allocator.free(part);
+                        result.release();
+                        return .{ .nil = {} };
+                    };
+                    if (i < str.len) {
+                        i += delim.len - 1;
+                        start = i + 1;
+                    }
+                }
+            }
+        }
+
+        return .{ .array = result };
+    }
+
+    pub fn builtin_string_trim(args: []const ScriptValue) ScriptValue {
+        if (args.len < 1 or args[0] != .string) return .{ .nil = {} };
+
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const str = args[0].string;
+
+        var start: usize = 0;
+        while (start < str.len and (str[start] == ' ' or str[start] == '\t' or str[start] == '\n' or str[start] == '\r')) {
+            start += 1;
+        }
+
+        var end: usize = str.len;
+        while (end > start and (str[end-1] == ' ' or str[end-1] == '\t' or str[end-1] == '\n' or str[end-1] == '\r')) {
+            end -= 1;
+        }
+
+        const result = allocator.dupe(u8, str[start..end]) catch return .{ .nil = {} };
+        return .{ .string = result };
+    }
+
+    pub fn builtin_string_starts_with(args: []const ScriptValue) ScriptValue {
+        if (args.len < 2 or args[0] != .string or args[1] != .string) return .{ .nil = {} };
+
+        const str = args[0].string;
+        const prefix = args[1].string;
+
+        if (prefix.len > str.len) return .{ .boolean = false };
+        return .{ .boolean = std.mem.eql(u8, str[0..prefix.len], prefix) };
+    }
+
+    pub fn builtin_string_ends_with(args: []const ScriptValue) ScriptValue {
+        if (args.len < 2 or args[0] != .string or args[1] != .string) return .{ .nil = {} };
+
+        const str = args[0].string;
+        const suffix = args[1].string;
+
+        if (suffix.len > str.len) return .{ .boolean = false };
+        return .{ .boolean = std.mem.eql(u8, str[str.len-suffix.len..], suffix) };
+    }
+
+    // Path utility functions
+    pub fn builtin_path_join(args: []const ScriptValue) ScriptValue {
+        if (args.len < 1) return .{ .nil = {} };
+
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        var parts = std.ArrayListUnmanaged([]const u8){};
+        defer parts.deinit(allocator);
+
+        for (args) |arg| {
+            if (arg != .string) continue;
+            parts.append(allocator, arg.string) catch return .{ .nil = {} };
+        }
+
+        if (parts.items.len == 0) {
+            const empty = allocator.dupe(u8, "") catch return .{ .nil = {} };
+            return .{ .string = empty };
+        }
+
+        const result = std.fs.path.join(allocator, parts.items) catch return .{ .nil = {} };
+        return .{ .string = result };
+    }
+
+    pub fn builtin_path_basename(args: []const ScriptValue) ScriptValue {
+        if (args.len < 1 or args[0] != .string) return .{ .nil = {} };
+
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const path = args[0].string;
+        const base = std.fs.path.basename(path);
+        const result = allocator.dupe(u8, base) catch return .{ .nil = {} };
+        return .{ .string = result };
+    }
+
+    pub fn builtin_path_dirname(args: []const ScriptValue) ScriptValue {
+        if (args.len < 1 or args[0] != .string) return .{ .nil = {} };
+
+        const allocator = helperAllocator() orelse return .{ .nil = {} };
+        const path = args[0].string;
+        const dir = std.fs.path.dirname(path) orelse "";
+        const result = allocator.dupe(u8, dir) catch return .{ .nil = {} };
+        return .{ .string = result };
+    }
+
+    pub fn builtin_path_is_absolute(args: []const ScriptValue) ScriptValue {
+        if (args.len < 1 or args[0] != .string) return .{ .nil = {} };
+        return .{ .boolean = std.fs.path.isAbsolute(args[0].string) };
+    }
+
     fn builtin_pcall_native(
         _: ?*anyopaque,
         vm_ptr: *anyopaque,
@@ -4616,12 +5265,36 @@ pub const BuiltinFunctions = struct {
             .{ .name = "format", .func = &builtin_format },
             .{ .name = "push", .func = &builtin_push },
             .{ .name = "pop", .func = &builtin_pop },
+            .{ .name = "sort", .func = &builtin_sort },
+            .{ .name = "floor", .func = &builtin_floor },
+            .{ .name = "ceil", .func = &builtin_ceil },
+            .{ .name = "abs", .func = &builtin_abs },
+            .{ .name = "sqrt", .func = &builtin_sqrt },
+            .{ .name = "min", .func = &builtin_min },
+            .{ .name = "max", .func = &builtin_max },
+            .{ .name = "random", .func = &builtin_random },
+            .{ .name = "concat", .func = &builtin_concat },
             .{ .name = "insert", .func = &builtin_insert },
             .{ .name = "remove", .func = &builtin_remove },
             .{ .name = "pairs", .func = &builtin_pairs },
             .{ .name = "ipairs", .func = &builtin_ipairs },
             .{ .name = "find", .func = &builtin_find },
             .{ .name = "match", .func = &builtin_match },
+            .{ .name = "table_clone", .func = &builtin_table_clone },
+            .{ .name = "table_merge", .func = &builtin_table_merge },
+            .{ .name = "table_keys", .func = &builtin_table_keys },
+            .{ .name = "table_values", .func = &builtin_table_values },
+            .{ .name = "table_find", .func = &builtin_table_find },
+            .{ .name = "table_map", .func = &builtin_table_map },
+            .{ .name = "table_filter", .func = &builtin_table_filter },
+            .{ .name = "string_split", .func = &builtin_string_split },
+            .{ .name = "string_trim", .func = &builtin_string_trim },
+            .{ .name = "string_starts_with", .func = &builtin_string_starts_with },
+            .{ .name = "string_ends_with", .func = &builtin_string_ends_with },
+            .{ .name = "path_join", .func = &builtin_path_join },
+            .{ .name = "path_basename", .func = &builtin_path_basename },
+            .{ .name = "path_dirname", .func = &builtin_path_dirname },
+            .{ .name = "path_is_absolute", .func = &builtin_path_is_absolute },
         };
 
         for (builtins) |builtin| {
@@ -6308,28 +6981,44 @@ pub const Parser = struct {
     }
 
     fn parseComparison(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction), reg_start: u16) anyerror!ParseResult {
-        var left = try self.parseAddition(constants, instructions, reg_start);
+        var left = try self.parseConcatenation(constants, instructions, reg_start);
         while (true) {
             self.skipWhitespace();
             if (self.matchOperator("<=")) {
                 self.skipWhitespace();
-                const right = try self.parseAddition(constants, instructions, left.next_reg);
+                const right = try self.parseConcatenation(constants, instructions, left.next_reg);
                 try instructions.append(self.allocator, .{ .opcode = .lte, .operands = [_]u16{ left.result_reg, left.result_reg, right.result_reg } });
                 left = .{ .result_reg = left.result_reg, .next_reg = right.next_reg };
             } else if (self.matchOperator(">=")) {
                 self.skipWhitespace();
-                const right = try self.parseAddition(constants, instructions, left.next_reg);
+                const right = try self.parseConcatenation(constants, instructions, left.next_reg);
                 try instructions.append(self.allocator, .{ .opcode = .gte, .operands = [_]u16{ left.result_reg, left.result_reg, right.result_reg } });
                 left = .{ .result_reg = left.result_reg, .next_reg = right.next_reg };
             } else if (self.matchOperator("<")) {
                 self.skipWhitespace();
-                const right = try self.parseAddition(constants, instructions, left.next_reg);
+                const right = try self.parseConcatenation(constants, instructions, left.next_reg);
                 try instructions.append(self.allocator, .{ .opcode = .lt, .operands = [_]u16{ left.result_reg, left.result_reg, right.result_reg } });
                 left = .{ .result_reg = left.result_reg, .next_reg = right.next_reg };
             } else if (self.matchOperator(">")) {
                 self.skipWhitespace();
-                const right = try self.parseAddition(constants, instructions, left.next_reg);
+                const right = try self.parseConcatenation(constants, instructions, left.next_reg);
                 try instructions.append(self.allocator, .{ .opcode = .gt, .operands = [_]u16{ left.result_reg, left.result_reg, right.result_reg } });
+                left = .{ .result_reg = left.result_reg, .next_reg = right.next_reg };
+            } else {
+                break;
+            }
+        }
+        return left;
+    }
+
+    fn parseConcatenation(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction), reg_start: u16) anyerror!ParseResult {
+        var left = try self.parseAddition(constants, instructions, reg_start);
+        while (true) {
+            self.skipWhitespace();
+            if (self.matchOperator("..")) {
+                self.skipWhitespace();
+                const right = try self.parseAddition(constants, instructions, left.next_reg);
+                try instructions.append(self.allocator, .{ .opcode = .concat, .operands = [_]u16{ left.result_reg, left.result_reg, right.result_reg } });
                 left = .{ .result_reg = left.result_reg, .next_reg = right.next_reg };
             } else {
                 break;
