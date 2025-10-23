@@ -686,6 +686,10 @@ pub const EngineConfig = struct {
     allow_syscalls: bool = false,
     deterministic: bool = false, // Disable time-based functions, random, etc.
     instrumentation: ?Instrumentation = null,
+    /// Use arena allocator for automatic memory cleanup (recommended for long-running scripts)
+    /// When enabled, all string allocations are freed when the engine is destroyed.
+    /// Note: This adds a small performance overhead but eliminates string leaks.
+    use_arena: bool = false,
 };
 
 pub const SecurityContext = struct {
@@ -836,6 +840,7 @@ pub const ScriptEngine = struct {
     diagnostics: std.ArrayListUnmanaged(ParseDiagnostic),
     metrics: ParseMetrics,
     plugins: PluginManager,
+    arena: ?*std.heap.ArenaAllocator, // Optional arena for string cleanup
 
     pub fn create(config: EngineConfig) !ScriptEngine {
         // Allocate the memory limiter on the heap so its address stays stable
@@ -843,6 +848,14 @@ pub const ScriptEngine = struct {
         errdefer config.allocator.destroy(limiter);
 
         limiter.* = MemoryLimitAllocator.init(config.allocator, config.memory_limit);
+
+        // Optionally create arena allocator for string cleanup
+        var arena: ?*std.heap.ArenaAllocator = null;
+        if (config.use_arena) {
+            arena = try config.allocator.create(std.heap.ArenaAllocator);
+            errdefer config.allocator.destroy(arena.?);
+            arena.?.* = std.heap.ArenaAllocator.init(limiter.allocator());
+        }
 
         var engine = ScriptEngine{
             .config = config,
@@ -854,11 +867,16 @@ pub const ScriptEngine = struct {
             .diagnostics = .{},
             .metrics = ParseMetrics.init(),
             .plugins = PluginManager.init(limiter.allocator()),
+            .arena = arena,
         };
 
         engine.globals = std.StringHashMap(ScriptValue).init(engine.tracked_allocator);
         errdefer engine.globals.deinit();
         errdefer engine.plugins.deinit();
+        errdefer if (engine.arena) |a| {
+            a.deinit();
+            config.allocator.destroy(a);
+        };
 
         engine.grove = try GroveIntegration.init(engine.tracked_allocator);
         errdefer engine.grove.deinit();
@@ -879,6 +897,12 @@ pub const ScriptEngine = struct {
 
         self.plugins.deinit();
         self.grove.deinit();
+
+        // Free the arena allocator if it was used
+        if (self.arena) |arena| {
+            arena.deinit();
+            self.config.allocator.destroy(arena);
+        }
 
         // Free the heap-allocated memory limiter
         if (self.memory_limiter) |limiter| {
@@ -4160,6 +4184,10 @@ threadlocal var active_vm: ?*VM = null;
 
 fn helperAllocator() ?std.mem.Allocator {
     if (active_vm) |vm| {
+        // Prefer arena allocator for string allocations if available
+        if (vm.engine.arena) |arena| {
+            return arena.allocator();
+        }
         return vm.allocator;
     }
     if (editor_helper_allocator) |allocator| {

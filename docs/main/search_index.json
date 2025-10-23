@@ -1,0 +1,98 @@
+{
+  "version": "1.0",
+  "entries": [
+    {
+      "name": "std",
+      "type": "variable",
+      "file": "src/main.zig",
+      "line": 1,
+      "keywords": ["std", "variable"]
+    },
+    {
+      "name": "ghostlang",
+      "type": "variable",
+      "file": "src/main.zig",
+      "line": 2,
+      "keywords": ["ghostlang", "variable"]
+    },
+    {
+      "name": "max_script_size",
+      "type": "variable",
+      "file": "src/main.zig",
+      "line": 4,
+      "keywords": ["max_script_size", "variable"]
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "file": "src/main.zig",
+      "line": 6,
+      "signature": "fn() void",
+      "keywords": ["main", "function"]
+    },
+    {
+      "name": "printUsage",
+      "type": "function",
+      "file": "src/main.zig",
+      "line": 70,
+      "signature": "fn() void",
+      "keywords": ["printUsage", "function"]
+    },
+    {
+      "name": "reportIoError",
+      "type": "function",
+      "file": "src/main.zig",
+      "line": 74,
+      "signature": "fn(err: anyerror, anyerror) void",
+      "keywords": ["reportIoError", "function"]
+    },
+    {
+      "name": "reportEngineError",
+      "type": "function",
+      "file": "src/main.zig",
+      "line": 78,
+      "signature": "fn(err: anyerror, anyerror) void",
+      "keywords": ["reportEngineError", "function"]
+    },
+    {
+      "name": "reportLoadError",
+      "type": "function",
+      "file": "src/main.zig",
+      "line": 82,
+      "signature": "fn(path: [, err: anyerror, anyerror) void",
+      "keywords": ["reportLoadError", "function"]
+    },
+    {
+      "name": "reportRuntimeError",
+      "type": "function",
+      "file": "src/main.zig",
+      "line": 96,
+      "signature": "fn(path: [, err: anyerror, anyerror) void",
+      "keywords": ["reportRuntimeError", "function"]
+    },
+    {
+      "name": "severityLabel",
+      "type": "function",
+      "file": "src/main.zig",
+      "line": 101,
+      "signature": "fn() [",
+      "keywords": ["severityLabel", "function"]
+    },
+    {
+      "name": "writeValue",
+      "type": "function",
+      "file": "src/main.zig",
+      "line": 109,
+      "signature": "fn(value: ghostlang, ) void",
+      "keywords": ["writeValue", "function"]
+    },
+    {
+      "name": "printFunction",
+      "type": "function",
+      "file": "src/main.zig",
+      "line": 129,
+      "signature": "fn() .",
+      "keywords": ["printFunction", "function"]
+    }
+  ]
+}

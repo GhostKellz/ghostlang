@@ -1,0 +1,155 @@
+{
+  "version": "1.0",
+  "entries": [
+    {
+      "name": "std",
+      "type": "variable",
+      "file": "src/pattern.zig",
+      "line": 5,
+      "keywords": ["std", "variable"]
+    },
+    {
+      "name": "PatternError",
+      "type": "error",
+      "file": "src/pattern.zig",
+      "line": 7,
+      "keywords": ["PatternError", "error"]
+    },
+    {
+      "name": "Capture",
+      "type": "struct",
+      "file": "src/pattern.zig",
+      "line": 17,
+      "keywords": ["Capture", "struct"]
+    },
+    {
+      "name": "MatchResult",
+      "type": "struct",
+      "file": "src/pattern.zig",
+      "line": 22,
+      "keywords": ["MatchResult", "struct"]
+    },
+    {
+      "name": "PatternType",
+      "type": "enum",
+      "file": "src/pattern.zig",
+      "line": 34,
+      "keywords": ["PatternType", "enum"]
+    },
+    {
+      "name": "Quantifier",
+      "type": "enum",
+      "file": "src/pattern.zig",
+      "line": 45,
+      "keywords": ["Quantifier", "enum"]
+    },
+    {
+      "name": "PatternNode",
+      "type": "struct",
+      "file": "src/pattern.zig",
+      "line": 53,
+      "keywords": ["PatternNode", "struct"]
+    },
+    {
+      "name": "Pattern",
+      "type": "struct",
+      "file": "src/pattern.zig",
+      "line": 61,
+      "keywords": ["Pattern", "struct"]
+    },
+    {
+      "name": "compile",
+      "type": "function",
+      "file": "src/pattern.zig",
+      "line": 75,
+      "signature": "fn(pat: [, ) PatternError!Pattern",
+      "keywords": ["compile", "function"]
+    },
+    {
+      "name": "isPunctuation",
+      "type": "function",
+      "file": "src/pattern.zig",
+      "line": 247,
+      "signature": "fn(u8) bool",
+      "keywords": ["isPunctuation", "function"]
+    },
+    {
+      "name": "matchCharClass",
+      "type": "function",
+      "file": "src/pattern.zig",
+      "line": 254,
+      "signature": "fn(u8, u8) bool",
+      "keywords": ["matchCharClass", "function"]
+    },
+    {
+      "name": "matchCharSet",
+      "type": "function",
+      "file": "src/pattern.zig",
+      "line": 270,
+      "signature": "fn(ch: u8, u8) bool",
+      "keywords": ["matchCharSet", "function"]
+    },
+    {
+      "name": "MatchState",
+      "type": "struct",
+      "file": "src/pattern.zig",
+      "line": 288,
+      "keywords": ["MatchState", "struct"]
+    },
+    {
+      "name": "InternalMatch",
+      "type": "struct",
+      "file": "src/pattern.zig",
+      "line": 296,
+      "keywords": ["InternalMatch", "struct"]
+    },
+    {
+      "name": "match",
+      "type": "function",
+      "file": "src/pattern.zig",
+      "line": 301,
+      "signature": "fn(compiled: *, text: [, start_pos: usize, usize) PatternError!MatchResult",
+      "keywords": ["match", "function"]
+    },
+    {
+      "name": "matchInternal",
+      "type": "function",
+      "file": "src/pattern.zig",
+      "line": 327,
+      "signature": "fn(text_pos: usize, usize, usize) PatternError!InternalMatch",
+      "keywords": ["matchInternal", "function"]
+    },
+    {
+      "name": "matchWithQuantifier",
+      "type": "function",
+      "file": "src/pattern.zig",
+      "line": 363,
+      "signature": "fn(text_pos: usize, usize, usize) PatternError!InternalMatch",
+      "keywords": ["matchWithQuantifier", "function"]
+    },
+    {
+      "name": "matchSingleChar",
+      "type": "function",
+      "file": "src/pattern.zig",
+      "line": 422,
+      "signature": "fn(ch: u8, u8) PatternError!bool",
+      "keywords": ["matchSingleChar", "function"]
+    },
+    {
+      "name": "find",
+      "type": "function",
+      "file": "src/pattern.zig",
+      "line": 434,
+      "signature": "fn(pattern_str: [, text: [, init: usize, usize) PatternError!?",
+      "keywords": ["find", "function"]
+    },
+    {
+      "name": "gsub",
+      "type": "function",
+      "file": "src/pattern.zig",
+      "line": 451,
+      "signature": "fn(text: [, pattern_str: [, replacement: [, ) PatternError![",
+      "keywords": ["gsub", "function"]
+    }
+  ]
+}

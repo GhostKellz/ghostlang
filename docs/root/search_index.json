@@ -1,0 +1,602 @@
+{
+  "version": "1.0",
+  "entries": [
+    {
+      "name": "std",
+      "type": "variable",
+      "file": "src/root.zig",
+      "line": 1,
+      "keywords": ["std", "variable"]
+    },
+    {
+      "name": "build_options",
+      "type": "variable",
+      "file": "src/root.zig",
+      "line": 2,
+      "keywords": ["build_options", "variable"]
+    },
+    {
+      "name": "MemoryLimitAllocator",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 6,
+      "keywords": ["MemoryLimitAllocator", "struct"]
+    },
+    {
+      "name": "ExecutionError",
+      "type": "error",
+      "file": "src/root.zig",
+      "line": 85,
+      "keywords": ["ExecutionError", "error"]
+    },
+    {
+      "name": "NativeCallResult",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 105,
+      "keywords": ["NativeCallResult", "struct"]
+    },
+    {
+      "name": "NativeFunction",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 110,
+      "keywords": ["NativeFunction", "struct"]
+    },
+    {
+      "name": "ScriptFunction",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 115,
+      "keywords": ["ScriptFunction", "struct"]
+    },
+    {
+      "name": "ScriptTable",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 242,
+      "keywords": ["ScriptTable", "struct"]
+    },
+    {
+      "name": "ScriptArray",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 296,
+      "keywords": ["ScriptArray", "struct"]
+    },
+    {
+      "name": "ScriptValueType",
+      "type": "enum",
+      "file": "src/root.zig",
+      "line": 346,
+      "keywords": ["ScriptValueType", "enum"]
+    },
+    {
+      "name": "ScriptValue",
+      "type": "union",
+      "file": "src/root.zig",
+      "line": 360,
+      "keywords": ["ScriptValue", "union"]
+    },
+    {
+      "name": "ScriptIterator",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 396,
+      "keywords": ["ScriptIterator", "struct"]
+    },
+    {
+      "name": "ScriptUpvalue",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 584,
+      "keywords": ["ScriptUpvalue", "struct"]
+    },
+    {
+      "name": "copyScriptValue",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 638,
+      "signature": "fn(value: ScriptValue, ScriptValue) ScriptValue",
+      "keywords": ["copyScriptValue", "function"]
+    },
+    {
+      "name": "editor_helper_allocator",
+      "type": "variable",
+      "file": "src/root.zig",
+      "line": 665,
+      "keywords": ["editor_helper_allocator", "variable"]
+    },
+    {
+      "name": "arrayIndexFromNumber",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 667,
+      "signature": "fn(f64) ExecutionError!usize",
+      "keywords": ["arrayIndexFromNumber", "function"]
+    },
+    {
+      "name": "Instrumentation",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 676,
+      "keywords": ["Instrumentation", "struct"]
+    },
+    {
+      "name": "EngineConfig",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 681,
+      "keywords": ["EngineConfig", "struct"]
+    },
+    {
+      "name": "SecurityContext",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 691,
+      "keywords": ["SecurityContext", "struct"]
+    },
+    {
+      "name": "GrammarKind",
+      "type": "enum",
+      "file": "src/root.zig",
+      "line": 723,
+      "keywords": ["GrammarKind", "enum"]
+    },
+    {
+      "name": "GrammarInfo",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 733,
+      "keywords": ["GrammarInfo", "struct"]
+    },
+    {
+      "name": "GrammarRegistry",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 740,
+      "keywords": ["GrammarRegistry", "struct"]
+    },
+    {
+      "name": "ParseSeverity",
+      "type": "enum",
+      "file": "src/root.zig",
+      "line": 804,
+      "keywords": ["ParseSeverity", "enum"]
+    },
+    {
+      "name": "ParseDiagnostic",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 810,
+      "keywords": ["ParseDiagnostic", "struct"]
+    },
+    {
+      "name": "appendDiagnosticOwned",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 817,
+      "signature": "fn(, severity: ParseSeverity, ParseSeverity, line: usize, usize, usize) void",
+      "keywords": ["appendDiagnosticOwned", "function"]
+    },
+    {
+      "name": "clearDiagnosticBuffer",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 822,
+      "signature": "fn(, ) void",
+      "keywords": ["clearDiagnosticBuffer", "function"]
+    },
+    {
+      "name": "ScriptEngine",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 829,
+      "keywords": ["ScriptEngine", "struct"]
+    },
+    {
+      "name": "Opcode",
+      "type": "enum",
+      "file": "src/root.zig",
+      "line": 1611,
+      "keywords": ["Opcode", "enum"]
+    },
+    {
+      "name": "Instruction",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1653,
+      "keywords": ["Instruction", "struct"]
+    },
+    {
+      "name": "SyntaxNodeKind",
+      "type": "enum",
+      "file": "src/root.zig",
+      "line": 1659,
+      "keywords": ["SyntaxNodeKind", "enum"]
+    },
+    {
+      "name": "SyntaxNode",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1665,
+      "keywords": ["SyntaxNode", "struct"]
+    },
+    {
+      "name": "SyntaxTree",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1672,
+      "keywords": ["SyntaxTree", "struct"]
+    },
+    {
+      "name": "ParseMetricsSnapshot",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1713,
+      "keywords": ["ParseMetricsSnapshot", "struct"]
+    },
+    {
+      "name": "ParseMetrics",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1725,
+      "keywords": ["ParseMetrics", "struct"]
+    },
+    {
+      "name": "PluginDescriptor",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1783,
+      "keywords": ["PluginDescriptor", "struct"]
+    },
+    {
+      "name": "PluginRecord",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1789,
+      "keywords": ["PluginRecord", "struct"]
+    },
+    {
+      "name": "PluginManager",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1794,
+      "keywords": ["PluginManager", "struct"]
+    },
+    {
+      "name": "GroveParseResult",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1890,
+      "keywords": ["GroveParseResult", "struct"]
+    },
+    {
+      "name": "GroveIntegration",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1909,
+      "keywords": ["GroveIntegration", "struct"]
+    },
+    {
+      "name": "ScopeFrame",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1948,
+      "keywords": ["ScopeFrame", "struct"]
+    },
+    {
+      "name": "CallFrame",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1965,
+      "keywords": ["CallFrame", "struct"]
+    },
+    {
+      "name": "ProtectedCall",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1975,
+      "keywords": ["ProtectedCall", "struct"]
+    },
+    {
+      "name": "VM",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 1984,
+      "keywords": ["VM", "struct"]
+    },
+    {
+      "name": "max_pattern_captures",
+      "type": "variable",
+      "file": "src/root.zig",
+      "line": 3376,
+      "keywords": ["max_pattern_captures", "variable"]
+    },
+    {
+      "name": "PatternError",
+      "type": "error",
+      "file": "src/root.zig",
+      "line": 3378,
+      "keywords": ["PatternError", "error"]
+    },
+    {
+      "name": "PatternQuantifier",
+      "type": "enum",
+      "file": "src/root.zig",
+      "line": 3385,
+      "keywords": ["PatternQuantifier", "enum"]
+    },
+    {
+      "name": "PatternElementKind",
+      "type": "enum",
+      "file": "src/root.zig",
+      "line": 3393,
+      "keywords": ["PatternElementKind", "enum"]
+    },
+    {
+      "name": "PatternClass",
+      "type": "enum",
+      "file": "src/root.zig",
+      "line": 3401,
+      "keywords": ["PatternClass", "enum"]
+    },
+    {
+      "name": "PatternCharSet",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 3424,
+      "keywords": ["PatternCharSet", "struct"]
+    },
+    {
+      "name": "PatternMatcherKind",
+      "type": "enum",
+      "file": "src/root.zig",
+      "line": 3460,
+      "keywords": ["PatternMatcherKind", "enum"]
+    },
+    {
+      "name": "PatternMatcher",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 3467,
+      "keywords": ["PatternMatcher", "struct"]
+    },
+    {
+      "name": "PatternElement",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 3475,
+      "keywords": ["PatternElement", "struct"]
+    },
+    {
+      "name": "CaptureState",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 3482,
+      "keywords": ["CaptureState", "struct"]
+    },
+    {
+      "name": "PatternState",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 3488,
+      "keywords": ["PatternState", "struct"]
+    },
+    {
+      "name": "CaptureRange",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 3518,
+      "keywords": ["CaptureRange", "struct"]
+    },
+    {
+      "name": "PatternMatch",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 3524,
+      "keywords": ["PatternMatch", "struct"]
+    },
+    {
+      "name": "MatchOutcome",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 3531,
+      "keywords": ["MatchOutcome", "struct"]
+    },
+    {
+      "name": "Pattern",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 3536,
+      "keywords": ["Pattern", "struct"]
+    },
+    {
+      "name": "matcherMatches",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 3681,
+      "signature": "fn(PatternMatcher, u8) bool",
+      "keywords": ["matcherMatches", "function"]
+    },
+    {
+      "name": "asciiIsHexDigit",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 3690,
+      "signature": "fn(u8) bool",
+      "keywords": ["asciiIsHexDigit", "function"]
+    },
+    {
+      "name": "classContains",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 3694,
+      "signature": "fn(PatternClass, u8) bool",
+      "keywords": ["classContains", "function"]
+    },
+    {
+      "name": "parseClassChar",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 3719,
+      "signature": "fn(u8) ?",
+      "keywords": ["parseClassChar", "function"]
+    },
+    {
+      "name": "compilePattern",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 3745,
+      "signature": "fn(pattern: [, ) PatternError!Pattern",
+      "keywords": ["compilePattern", "function"]
+    },
+    {
+      "name": "executePatternMatch",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 3908,
+      "signature": "fn(subject: [, pattern_text: [, start_index: usize, usize) PatternError!?",
+      "keywords": ["executePatternMatch", "function"]
+    },
+    {
+      "name": "luaNormalizeStart",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 3919,
+      "signature": "fn(f64, usize) usize",
+      "keywords": ["luaNormalizeStart", "function"]
+    },
+    {
+      "name": "luaNormalizeEnd",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 3932,
+      "signature": "fn(f64, usize) usize",
+      "keywords": ["luaNormalizeEnd", "function"]
+    },
+    {
+      "name": "computeSubRange",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 3945,
+      "signature": "fn(usize, f64, start: usize) struct",
+      "keywords": ["computeSubRange", "function"]
+    },
+    {
+      "name": "scriptValueToString",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 3956,
+      "signature": "fn(value: ScriptValue, ScriptValue) [",
+      "keywords": ["scriptValueToString", "function"]
+    },
+    {
+      "name": "appendReplacement",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 3972,
+      "signature": "fn(, replacement: [, subject: [, match: PatternMatch, PatternMatch) PatternError!void",
+      "keywords": ["appendReplacement", "function"]
+    },
+    {
+      "name": "performGlobalSubstitute",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 4013,
+      "signature": "fn(subject: [, pattern_text: [, replacement: [, max_replacements: ?, ) PatternError!struct",
+      "keywords": ["performGlobalSubstitute", "function"]
+    },
+    {
+      "name": "active_vm",
+      "type": "variable",
+      "file": "src/root.zig",
+      "line": 4065,
+      "keywords": ["active_vm", "variable"]
+    },
+    {
+      "name": "helperAllocator",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 4067,
+      "signature": "fn() ?",
+      "keywords": ["helperAllocator", "function"]
+    },
+    {
+      "name": "makeHelperStringLiteral",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 4077,
+      "signature": "fn() ScriptValue",
+      "keywords": ["makeHelperStringLiteral", "function"]
+    },
+    {
+      "name": "BuiltinFunctions",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 4085,
+      "keywords": ["BuiltinFunctions", "struct"]
+    },
+    {
+      "name": "EditorAPI",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 4653,
+      "keywords": ["EditorAPI", "struct"]
+    },
+    {
+      "name": "Script",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 4780,
+      "keywords": ["Script", "struct"]
+    },
+    {
+      "name": "Parser",
+      "type": "struct",
+      "file": "src/root.zig",
+      "line": 4819,
+      "keywords": ["Parser", "struct"]
+    },
+    {
+      "name": "groveParseGhostlang",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 6932,
+      "signature": "fn(source: [, diagnostics: *, ) ExecutionError!GroveParseResult",
+      "keywords": ["groveParseGhostlang", "function"]
+    },
+    {
+      "name": "bufferedPrint",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 6973,
+      "signature": "fn() void",
+      "keywords": ["bufferedPrint", "function"]
+    },
+    {
+      "name": "add",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 6986,
+      "signature": "fn(i32, i32) i32",
+      "keywords": ["add", "function"]
+    },
+    {
+      "name": "identityPrint",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 6994,
+      "signature": "fn() ScriptValue",
+      "keywords": ["identityPrint", "function"]
+    },
+    {
+      "name": "sumNumbers",
+      "type": "function",
+      "file": "src/root.zig",
+      "line": 7001,
+      "signature": "fn() ScriptValue",
+      "keywords": ["sumNumbers", "function"]
+    }
+  ]
+}

@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zdoc Documentation</title>
+<style>
+body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; }}
+h1 {{ color: #333; margin: 0 0 20px 0; }}
+h2 {{ color: #666; border-bottom: 1px solid #ddd; margin: 30px 0 15px 0; }}
+.container {{ display: flex; min-height: 100vh; }}
+.sidebar {{ width: 250px; background: #f8f9fa; border-right: 1px solid #ddd; padding: 20px; overflow-y: auto; }}
+.content {{ flex: 1; padding: 40px; }}
+.nav-section {{ margin-bottom: 20px; }}
+.nav-title {{ font-weight: bold; color: #666; margin-bottom: 8px; text-transform: uppercase; font-size: 0.9em; }}
+.nav-item {{ display: block; color: #007acc; text-decoration: none; padding: 4px 8px; border-radius: 3px; margin-bottom: 2px; }}
+.nav-item:hover {{ background: #e9ecef; }}
+.nav-function {{ border-left: 3px solid #28a745; }}
+.nav-struct {{ border-left: 3px solid #dc3545; }}
+.nav-enum {{ border-left: 3px solid #ffc107; }}
+.nav-union {{ border-left: 3px solid #17a2b8; }}
+.nav-variable {{ border-left: 3px solid #6c757d; }}
+.declaration {{ margin: 10px 0; padding: 10px; background: #f8f9fa; border-left: 3px solid #007acc; }}
+.function {{ border-left-color: #28a745; }}
+.struct {{ border-left-color: #dc3545; }}
+.enum {{ border-left-color: #ffc107; }}
+.union {{ border-left-color: #17a2b8; }}
+.variable {{ border-left-color: #6c757d; }}
+.name {{ font-weight: bold; }}
+.kind {{ color: #666; font-size: 0.8em; text-transform: uppercase; }}
+.signature {{ font-family: monospace; color: #333; }}
+.doc-comment {{ color: #555; font-style: italic; margin-top: 5px; padding: 5px; background: #f0f0f0; border-radius: 3px; }}
+.code-block {{ background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; padding: 15px; margin: 10px 0; overflow-x: auto; }}
+.code-block code {{ background: none; padding: 0; }}
+.zig-keyword {{ color: #0066cc; font-weight: bold; }}
+.zig-string {{ color: #008800; }}
+.zig-number {{ color: #aa6600; }}
+.zig-comment {{ color: #888888; font-style: italic; }}
+.zig-type {{ color: #0088aa; font-weight: bold; }}
+.zig-function {{ color: #7700aa; }}
+.generic-indicator {{ color: #cc6600; font-weight: bold; font-style: italic; }}
+.badge {{ display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.75em; font-weight: bold; margin-left: 5px; }}
+.badge-pub {{ background: #28a745; color: white; }}
+.badge-export {{ background: #007acc; color: white; }}
+.badge-extern {{ background: #6c757d; color: white; }}
+.badge-generic {{ background: #cc6600; color: white; }}
+.params-section {{ margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 4px; }}
+.params-title {{ font-weight: bold; color: #555; margin-bottom: 5px; }}
+.param-item {{ margin: 5px 0 5px 15px; font-family: monospace; }}
+.param-name {{ color: #0066cc; font-weight: bold; }}
+.param-type {{ color: #0088aa; }}
+.return-section {{ margin: 10px 0; padding: 8px; background: #e9f7ef; border-left: 3px solid #28a745; }}
+.error-section {{ margin: 10px 0; padding: 8px; background: #fff3cd; border-left: 3px solid #ffc107; }}
+.fields-table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
+.fields-table th {{ background: #e9ecef; padding: 8px; text-align: left; border: 1px solid #ddd; }}
+.fields-table td {{ padding: 8px; border: 1px solid #ddd; font-family: monospace; }}
+.source-link {{ display: inline-block; margin-top: 5px; font-size: 0.85em; color: #007acc; text-decoration: none; }}
+.source-link:hover {{ text-decoration: underline; }}
+.doc-tags {{ margin: 10px 0; }}
+.doc-tag {{ margin: 5px 0; padding: 5px; background: #f0f4f8; border-left: 2px solid #007acc; }}
+.doc-tag-label {{ font-weight: bold; color: #007acc; }}
+
+/* Mobile responsive design */
+@media (max-width: 768px) {{
+  .container {{ flex-direction: column; }}
+  .sidebar {{ width: 100%; border-right: none; border-bottom: 1px solid #ddd; padding: 15px; }}
+  .content {{ padding: 20px; }}
+  .nav-section {{ display: inline-block; margin-right: 20px; vertical-align: top; }}
+  .nav-title {{ margin-bottom: 5px; }}
+  .nav-item {{ display: inline-block; margin-right: 10px; margin-bottom: 5px; }}
+  h1 {{ font-size: 1.8em; }}
+  h2 {{ font-size: 1.4em; }}
+  .declaration {{ margin: 8px 0; padding: 8px; }}
+}}
+
+@media (max-width: 480px) {{
+  .content {{ padding: 15px; }}
+  .sidebar {{ padding: 10px; }}
+  h1 {{ font-size: 1.6em; }}
+  h2 {{ font-size: 1.2em; }}
+  .nav-section {{ display: block; margin-bottom: 15px; }}
+  .declaration {{ margin: 6px 0; padding: 6px; }}
+}}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="sidebar">
+<h3>Navigation</h3>
+<div style="margin-bottom: 15px;">
+<input type="text" id="search" placeholder="Search declarations..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+</div>
+<div class="nav-section">
+<div class="nav-title">Functions</div><a href="#copyScriptValue" class="nav-item nav-function">copyScriptValue</a><a href="#arrayIndexFromNumber" class="nav-item nav-function">arrayIndexFromNumber</a><a href="#appendDiagnosticOwned" class="nav-item nav-function">appendDiagnosticOwned</a><a href="#clearDiagnosticBuffer" class="nav-item nav-function">clearDiagnosticBuffer</a><a href="#matcherMatches" class="nav-item nav-function">matcherMatches</a><a href="#asciiIsHexDigit" class="nav-item nav-function">asciiIsHexDigit</a><a href="#classContains" class="nav-item nav-function">classContains</a><a href="#parseClassChar" class="nav-item nav-function">parseClassChar</a><a href="#compilePattern" class="nav-item nav-function">compilePattern</a><a href="#executePatternMatch" class="nav-item nav-function">executePatternMatch</a><a href="#luaNormalizeStart" class="nav-item nav-function">luaNormalizeStart</a><a href="#luaNormalizeEnd" class="nav-item nav-function">luaNormalizeEnd</a><a href="#computeSubRange" class="nav-item nav-function">computeSubRange</a><a href="#scriptValueToString" class="nav-item nav-function">scriptValueToString</a><a href="#appendReplacement" class="nav-item nav-function">appendReplacement</a><a href="#performGlobalSubstitute" class="nav-item nav-function">performGlobalSubstitute</a><a href="#helperAllocator" class="nav-item nav-function">helperAllocator</a><a href="#makeHelperStringLiteral" class="nav-item nav-function">makeHelperStringLiteral</a><a href="#groveParseGhostlang" class="nav-item nav-function">groveParseGhostlang</a><a href="#bufferedPrint" class="nav-item nav-function">bufferedPrint</a><a href="#add" class="nav-item nav-function">add</a><a href="#identityPrint" class="nav-item nav-function">identityPrint</a><a href="#sumNumbers" class="nav-item nav-function">sumNumbers</a></div>
+<div class="nav-section">
+<div class="nav-title">Structs</div><a href="#MemoryLimitAllocator" class="nav-item nav-struct">MemoryLimitAllocator</a><a href="#NativeCallResult" class="nav-item nav-struct">NativeCallResult</a><a href="#NativeFunction" class="nav-item nav-struct">NativeFunction</a><a href="#ScriptFunction" class="nav-item nav-struct">ScriptFunction</a><a href="#ScriptTable" class="nav-item nav-struct">ScriptTable</a><a href="#ScriptArray" class="nav-item nav-struct">ScriptArray</a><a href="#ScriptIterator" class="nav-item nav-struct">ScriptIterator</a><a href="#ScriptUpvalue" class="nav-item nav-struct">ScriptUpvalue</a><a href="#Instrumentation" class="nav-item nav-struct">Instrumentation</a><a href="#EngineConfig" class="nav-item nav-struct">EngineConfig</a><a href="#SecurityContext" class="nav-item nav-struct">SecurityContext</a><a href="#GrammarInfo" class="nav-item nav-struct">GrammarInfo</a><a href="#GrammarRegistry" class="nav-item nav-struct">GrammarRegistry</a><a href="#ParseDiagnostic" class="nav-item nav-struct">ParseDiagnostic</a><a href="#ScriptEngine" class="nav-item nav-struct">ScriptEngine</a><a href="#Instruction" class="nav-item nav-struct">Instruction</a><a href="#SyntaxNode" class="nav-item nav-struct">SyntaxNode</a><a href="#SyntaxTree" class="nav-item nav-struct">SyntaxTree</a><a href="#ParseMetricsSnapshot" class="nav-item nav-struct">ParseMetricsSnapshot</a><a href="#ParseMetrics" class="nav-item nav-struct">ParseMetrics</a><a href="#PluginDescriptor" class="nav-item nav-struct">PluginDescriptor</a><a href="#PluginRecord" class="nav-item nav-struct">PluginRecord</a><a href="#PluginManager" class="nav-item nav-struct">PluginManager</a><a href="#GroveParseResult" class="nav-item nav-struct">GroveParseResult</a><a href="#GroveIntegration" class="nav-item nav-struct">GroveIntegration</a><a href="#ScopeFrame" class="nav-item nav-struct">ScopeFrame</a><a href="#CallFrame" class="nav-item nav-struct">CallFrame</a><a href="#ProtectedCall" class="nav-item nav-struct">ProtectedCall</a><a href="#VM" class="nav-item nav-struct">VM</a><a href="#PatternCharSet" class="nav-item nav-struct">PatternCharSet</a><a href="#PatternMatcher" class="nav-item nav-struct">PatternMatcher</a><a href="#PatternElement" class="nav-item nav-struct">PatternElement</a><a href="#CaptureState" class="nav-item nav-struct">CaptureState</a><a href="#PatternState" class="nav-item nav-struct">PatternState</a><a href="#CaptureRange" class="nav-item nav-struct">CaptureRange</a><a href="#PatternMatch" class="nav-item nav-struct">PatternMatch</a><a href="#MatchOutcome" class="nav-item nav-struct">MatchOutcome</a><a href="#Pattern" class="nav-item nav-struct">Pattern</a><a href="#BuiltinFunctions" class="nav-item nav-struct">BuiltinFunctions</a><a href="#EditorAPI" class="nav-item nav-struct">EditorAPI</a><a href="#Script" class="nav-item nav-struct">Script</a><a href="#Parser" class="nav-item nav-struct">Parser</a></div>
+<div class="nav-section">
+<div class="nav-title">Enums</div><a href="#ScriptValueType" class="nav-item nav-enum">ScriptValueType</a><a href="#GrammarKind" class="nav-item nav-enum">GrammarKind</a><a href="#ParseSeverity" class="nav-item nav-enum">ParseSeverity</a><a href="#Opcode" class="nav-item nav-enum">Opcode</a><a href="#SyntaxNodeKind" class="nav-item nav-enum">SyntaxNodeKind</a><a href="#PatternQuantifier" class="nav-item nav-enum">PatternQuantifier</a><a href="#PatternElementKind" class="nav-item nav-enum">PatternElementKind</a><a href="#PatternClass" class="nav-item nav-enum">PatternClass</a><a href="#PatternMatcherKind" class="nav-item nav-enum">PatternMatcherKind</a></div>
+<div class="nav-section">
+<div class="nav-title">Unions</div><a href="#ScriptValue" class="nav-item nav-union">ScriptValue</a></div>
+<div class="nav-section">
+<div class="nav-title">Error Sets</div><a href="#ExecutionError" class="nav-item nav-error">ExecutionError</a><a href="#PatternError" class="nav-item nav-error">PatternError</a></div>
+<div class="nav-section">
+<div class="nav-title">Variables</div><a href="#std" class="nav-item nav-variable">std</a><a href="#build_options" class="nav-item nav-variable">build_options</a><a href="#editor_helper_allocator" class="nav-item nav-variable">editor_helper_allocator</a><a href="#max_pattern_captures" class="nav-item nav-variable">max_pattern_captures</a><a href="#active_vm" class="nav-item nav-variable">active_vm</a></div>
+</div>
+<div class="content">
+<h1>API Documentation for src/root.zig</h1><h2>Functions</h2>
+<div class="declaration function" id="copyScriptValue">
+<span class="name">copyScriptValue</span> <span class="kind">Functions</span><br><span class="signature">fn(value: ScriptValue, ScriptValue) ScriptValue</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">value</span>: <span class="param-type">ScriptValue</span></div><div class="param-item"><span class="param-name">ScriptValue</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">ScriptValue</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L638" class="source-link" target="_blank">🔗 root.zig:638</a></div>
+<div class="declaration function" id="arrayIndexFromNumber">
+<span class="name">arrayIndexFromNumber</span> <span class="kind">Functions</span><br><span class="signature">fn(f64) ExecutionError!usize</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">f64</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">usize</span></div><div class="error-section"><strong>Errors:</strong> <span class="param-type">ExecutionError</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L667" class="source-link" target="_blank">🔗 root.zig:667</a></div>
+<div class="declaration function" id="appendDiagnosticOwned">
+<span class="name">appendDiagnosticOwned</span> <span class="kind">Functions</span><br><span class="signature">fn(, severity: ParseSeverity, ParseSeverity, line: usize, usize, usize) void</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name"></span></div><div class="param-item"><span class="param-name">severity</span>: <span class="param-type">ParseSeverity</span></div><div class="param-item"><span class="param-name">ParseSeverity</span></div><div class="param-item"><span class="param-name">line</span>: <span class="param-type">usize</span></div><div class="param-item"><span class="param-name">usize</span></div><div class="param-item"><span class="param-name">usize</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">void</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L817" class="source-link" target="_blank">🔗 root.zig:817</a></div>
+<div class="declaration function" id="clearDiagnosticBuffer">
+<span class="name">clearDiagnosticBuffer</span> <span class="kind">Functions</span><br><span class="signature">fn(, ) void</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name"></span></div><div class="param-item"><span class="param-name"></span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">void</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L822" class="source-link" target="_blank">🔗 root.zig:822</a></div>
+<div class="declaration function" id="matcherMatches">
+<span class="name">matcherMatches</span> <span class="kind">Functions</span><br><span class="signature">fn(PatternMatcher, u8) bool</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">PatternMatcher</span></div><div class="param-item"><span class="param-name">u8</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">bool</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3681" class="source-link" target="_blank">🔗 root.zig:3681</a></div>
+<div class="declaration function" id="asciiIsHexDigit">
+<span class="name">asciiIsHexDigit</span> <span class="kind">Functions</span><br><span class="signature">fn(u8) bool</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">u8</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">bool</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3690" class="source-link" target="_blank">🔗 root.zig:3690</a></div>
+<div class="declaration function" id="classContains">
+<span class="name">classContains</span> <span class="kind">Functions</span><br><span class="signature">fn(PatternClass, u8) bool</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">PatternClass</span></div><div class="param-item"><span class="param-name">u8</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">bool</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3694" class="source-link" target="_blank">🔗 root.zig:3694</a></div>
+<div class="declaration function" id="parseClassChar">
+<span class="name">parseClassChar</span> <span class="kind">Functions</span><br><span class="signature">fn(u8) ?</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">u8</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">?</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3719" class="source-link" target="_blank">🔗 root.zig:3719</a></div>
+<div class="declaration function" id="compilePattern">
+<span class="name">compilePattern</span> <span class="kind">Functions</span><br><span class="signature">fn(pattern: [, ) PatternError!Pattern</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">pattern</span>: <span class="param-type">[</span></div><div class="param-item"><span class="param-name"></span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">Pattern</span></div><div class="error-section"><strong>Errors:</strong> <span class="param-type">PatternError</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3745" class="source-link" target="_blank">🔗 root.zig:3745</a></div>
+<div class="declaration function" id="executePatternMatch">
+<span class="name">executePatternMatch</span> <span class="kind">Functions</span><br><span class="signature">fn(subject: [, pattern_text: [, start_index: usize, usize) PatternError!?</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">subject</span>: <span class="param-type">[</span></div><div class="param-item"><span class="param-name">pattern_text</span>: <span class="param-type">[</span></div><div class="param-item"><span class="param-name">start_index</span>: <span class="param-type">usize</span></div><div class="param-item"><span class="param-name">usize</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">?</span></div><div class="error-section"><strong>Errors:</strong> <span class="param-type">PatternError</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3908" class="source-link" target="_blank">🔗 root.zig:3908</a></div>
+<div class="declaration function" id="luaNormalizeStart">
+<span class="name">luaNormalizeStart</span> <span class="kind">Functions</span><br><span class="signature">fn(f64, usize) usize</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">f64</span></div><div class="param-item"><span class="param-name">usize</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">usize</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3919" class="source-link" target="_blank">🔗 root.zig:3919</a></div>
+<div class="declaration function" id="luaNormalizeEnd">
+<span class="name">luaNormalizeEnd</span> <span class="kind">Functions</span><br><span class="signature">fn(f64, usize) usize</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">f64</span></div><div class="param-item"><span class="param-name">usize</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">usize</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3932" class="source-link" target="_blank">🔗 root.zig:3932</a></div>
+<div class="declaration function" id="computeSubRange">
+<span class="name">computeSubRange</span> <span class="kind">Functions</span><br><span class="signature">fn(usize, f64, start: usize) struct</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">usize</span></div><div class="param-item"><span class="param-name">f64</span></div><div class="param-item"><span class="param-name">start</span>: <span class="param-type">usize</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">struct</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3945" class="source-link" target="_blank">🔗 root.zig:3945</a></div>
+<div class="declaration function" id="scriptValueToString">
+<span class="name">scriptValueToString</span> <span class="kind">Functions</span><br><span class="signature">fn(value: ScriptValue, ScriptValue) [</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">value</span>: <span class="param-type">ScriptValue</span></div><div class="param-item"><span class="param-name">ScriptValue</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">[</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3956" class="source-link" target="_blank">🔗 root.zig:3956</a></div>
+<div class="declaration function" id="appendReplacement">
+<span class="name">appendReplacement</span> <span class="kind">Functions</span><br><span class="signature">fn(, replacement: [, subject: [, match: PatternMatch, PatternMatch) PatternError!void</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name"></span></div><div class="param-item"><span class="param-name">replacement</span>: <span class="param-type">[</span></div><div class="param-item"><span class="param-name">subject</span>: <span class="param-type">[</span></div><div class="param-item"><span class="param-name">match</span>: <span class="param-type">PatternMatch</span></div><div class="param-item"><span class="param-name">PatternMatch</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">void</span></div><div class="error-section"><strong>Errors:</strong> <span class="param-type">PatternError</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3972" class="source-link" target="_blank">🔗 root.zig:3972</a></div>
+<div class="declaration function" id="performGlobalSubstitute">
+<span class="name">performGlobalSubstitute</span> <span class="kind">Functions</span><br><span class="signature">fn(subject: [, pattern_text: [, replacement: [, max_replacements: ?, ) PatternError!struct</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">subject</span>: <span class="param-type">[</span></div><div class="param-item"><span class="param-name">pattern_text</span>: <span class="param-type">[</span></div><div class="param-item"><span class="param-name">replacement</span>: <span class="param-type">[</span></div><div class="param-item"><span class="param-name">max_replacements</span>: <span class="param-type">?</span></div><div class="param-item"><span class="param-name"></span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">struct</span></div><div class="error-section"><strong>Errors:</strong> <span class="param-type">PatternError</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L4013" class="source-link" target="_blank">🔗 root.zig:4013</a></div>
+<div class="declaration function" id="helperAllocator">
+<span class="name">helperAllocator</span> <span class="kind">Functions</span><br><span class="signature">fn() ?</span><div class="return-section"><strong>Returns:</strong> <span class="param-type">?</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L4067" class="source-link" target="_blank">🔗 root.zig:4067</a></div>
+<div class="declaration function" id="makeHelperStringLiteral">
+<span class="name">makeHelperStringLiteral</span> <span class="kind">Functions</span><br><span class="signature">fn() ScriptValue</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name"></span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">ScriptValue</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L4077" class="source-link" target="_blank">🔗 root.zig:4077</a></div>
+<div class="declaration function" id="groveParseGhostlang">
+<span class="name">groveParseGhostlang</span> <span class="kind">Functions</span><br><span class="signature">fn(source: [, diagnostics: *, ) ExecutionError!GroveParseResult</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">source</span>: <span class="param-type">[</span></div><div class="param-item"><span class="param-name">diagnostics</span>: <span class="param-type">*</span></div><div class="param-item"><span class="param-name"></span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">GroveParseResult</span></div><div class="error-section"><strong>Errors:</strong> <span class="param-type">ExecutionError</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L6932" class="source-link" target="_blank">🔗 root.zig:6932</a></div>
+<div class="declaration function" id="bufferedPrint">
+<span class="name">bufferedPrint</span> <span class="kind">Functions</span><span class="badge badge-pub">pub</span><br><span class="signature">fn() void</span><div class="return-section"><strong>Returns:</strong> <span class="param-type">void</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L6973" class="source-link" target="_blank">🔗 root.zig:6973</a></div>
+<div class="declaration function" id="add">
+<span class="name">add</span> <span class="kind">Functions</span><span class="badge badge-pub">pub</span><br><span class="signature">fn(i32, i32) i32</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name">i32</span></div><div class="param-item"><span class="param-name">i32</span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">i32</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L6986" class="source-link" target="_blank">🔗 root.zig:6986</a></div>
+<div class="declaration function" id="identityPrint">
+<span class="name">identityPrint</span> <span class="kind">Functions</span><br><span class="signature">fn() ScriptValue</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name"></span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">ScriptValue</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L6994" class="source-link" target="_blank">🔗 root.zig:6994</a></div>
+<div class="declaration function" id="sumNumbers">
+<span class="name">sumNumbers</span> <span class="kind">Functions</span><br><span class="signature">fn() ScriptValue</span><div class="params-section"><div class="params-title">Parameters:</div><div class="param-item"><span class="param-name"></span></div></div><div class="return-section"><strong>Returns:</strong> <span class="param-type">ScriptValue</span></div><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L7001" class="source-link" target="_blank">🔗 root.zig:7001</a></div>
+<h2>Structs</h2>
+<div class="declaration struct" id="MemoryLimitAllocator">
+<span class="name">MemoryLimitAllocator</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L6" class="source-link" target="_blank">🔗 root.zig:6</a></div>
+<div class="declaration struct" id="NativeCallResult">
+<span class="name">NativeCallResult</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L105" class="source-link" target="_blank">🔗 root.zig:105</a></div>
+<div class="declaration struct" id="NativeFunction">
+<span class="name">NativeFunction</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L110" class="source-link" target="_blank">🔗 root.zig:110</a></div>
+<div class="declaration struct" id="ScriptFunction">
+<span class="name">ScriptFunction</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L115" class="source-link" target="_blank">🔗 root.zig:115</a></div>
+<div class="declaration struct" id="ScriptTable">
+<span class="name">ScriptTable</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L242" class="source-link" target="_blank">🔗 root.zig:242</a></div>
+<div class="declaration struct" id="ScriptArray">
+<span class="name">ScriptArray</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L296" class="source-link" target="_blank">🔗 root.zig:296</a></div>
+<div class="declaration struct" id="ScriptIterator">
+<span class="name">ScriptIterator</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L396" class="source-link" target="_blank">🔗 root.zig:396</a></div>
+<div class="declaration struct" id="ScriptUpvalue">
+<span class="name">ScriptUpvalue</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L584" class="source-link" target="_blank">🔗 root.zig:584</a></div>
+<div class="declaration struct" id="Instrumentation">
+<span class="name">Instrumentation</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L676" class="source-link" target="_blank">🔗 root.zig:676</a></div>
+<div class="declaration struct" id="EngineConfig">
+<span class="name">EngineConfig</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L681" class="source-link" target="_blank">🔗 root.zig:681</a></div>
+<div class="declaration struct" id="SecurityContext">
+<span class="name">SecurityContext</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L691" class="source-link" target="_blank">🔗 root.zig:691</a></div>
+<div class="declaration struct" id="GrammarInfo">
+<span class="name">GrammarInfo</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L733" class="source-link" target="_blank">🔗 root.zig:733</a></div>
+<div class="declaration struct" id="GrammarRegistry">
+<span class="name">GrammarRegistry</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L740" class="source-link" target="_blank">🔗 root.zig:740</a></div>
+<div class="declaration struct" id="ParseDiagnostic">
+<span class="name">ParseDiagnostic</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L810" class="source-link" target="_blank">🔗 root.zig:810</a></div>
+<div class="declaration struct" id="ScriptEngine">
+<span class="name">ScriptEngine</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L829" class="source-link" target="_blank">🔗 root.zig:829</a></div>
+<div class="declaration struct" id="Instruction">
+<span class="name">Instruction</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1653" class="source-link" target="_blank">🔗 root.zig:1653</a></div>
+<div class="declaration struct" id="SyntaxNode">
+<span class="name">SyntaxNode</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1665" class="source-link" target="_blank">🔗 root.zig:1665</a></div>
+<div class="declaration struct" id="SyntaxTree">
+<span class="name">SyntaxTree</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1672" class="source-link" target="_blank">🔗 root.zig:1672</a></div>
+<div class="declaration struct" id="ParseMetricsSnapshot">
+<span class="name">ParseMetricsSnapshot</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1713" class="source-link" target="_blank">🔗 root.zig:1713</a></div>
+<div class="declaration struct" id="ParseMetrics">
+<span class="name">ParseMetrics</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1725" class="source-link" target="_blank">🔗 root.zig:1725</a></div>
+<div class="declaration struct" id="PluginDescriptor">
+<span class="name">PluginDescriptor</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1783" class="source-link" target="_blank">🔗 root.zig:1783</a></div>
+<div class="declaration struct" id="PluginRecord">
+<span class="name">PluginRecord</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1789" class="source-link" target="_blank">🔗 root.zig:1789</a></div>
+<div class="declaration struct" id="PluginManager">
+<span class="name">PluginManager</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1794" class="source-link" target="_blank">🔗 root.zig:1794</a></div>
+<div class="declaration struct" id="GroveParseResult">
+<span class="name">GroveParseResult</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1890" class="source-link" target="_blank">🔗 root.zig:1890</a></div>
+<div class="declaration struct" id="GroveIntegration">
+<span class="name">GroveIntegration</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1909" class="source-link" target="_blank">🔗 root.zig:1909</a></div>
+<div class="declaration struct" id="ScopeFrame">
+<span class="name">ScopeFrame</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1948" class="source-link" target="_blank">🔗 root.zig:1948</a></div>
+<div class="declaration struct" id="CallFrame">
+<span class="name">CallFrame</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1965" class="source-link" target="_blank">🔗 root.zig:1965</a></div>
+<div class="declaration struct" id="ProtectedCall">
+<span class="name">ProtectedCall</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1975" class="source-link" target="_blank">🔗 root.zig:1975</a></div>
+<div class="declaration struct" id="VM">
+<span class="name">VM</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1984" class="source-link" target="_blank">🔗 root.zig:1984</a></div>
+<div class="declaration struct" id="PatternCharSet">
+<span class="name">PatternCharSet</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3424" class="source-link" target="_blank">🔗 root.zig:3424</a></div>
+<div class="declaration struct" id="PatternMatcher">
+<span class="name">PatternMatcher</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3467" class="source-link" target="_blank">🔗 root.zig:3467</a></div>
+<div class="declaration struct" id="PatternElement">
+<span class="name">PatternElement</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3475" class="source-link" target="_blank">🔗 root.zig:3475</a></div>
+<div class="declaration struct" id="CaptureState">
+<span class="name">CaptureState</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3482" class="source-link" target="_blank">🔗 root.zig:3482</a></div>
+<div class="declaration struct" id="PatternState">
+<span class="name">PatternState</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3488" class="source-link" target="_blank">🔗 root.zig:3488</a></div>
+<div class="declaration struct" id="CaptureRange">
+<span class="name">CaptureRange</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3518" class="source-link" target="_blank">🔗 root.zig:3518</a></div>
+<div class="declaration struct" id="PatternMatch">
+<span class="name">PatternMatch</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3524" class="source-link" target="_blank">🔗 root.zig:3524</a></div>
+<div class="declaration struct" id="MatchOutcome">
+<span class="name">MatchOutcome</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3531" class="source-link" target="_blank">🔗 root.zig:3531</a></div>
+<div class="declaration struct" id="Pattern">
+<span class="name">Pattern</span> <span class="kind">Structs</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3536" class="source-link" target="_blank">🔗 root.zig:3536</a></div>
+<div class="declaration struct" id="BuiltinFunctions">
+<span class="name">BuiltinFunctions</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L4085" class="source-link" target="_blank">🔗 root.zig:4085</a></div>
+<div class="declaration struct" id="EditorAPI">
+<span class="name">EditorAPI</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L4653" class="source-link" target="_blank">🔗 root.zig:4653</a></div>
+<div class="declaration struct" id="Script">
+<span class="name">Script</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L4780" class="source-link" target="_blank">🔗 root.zig:4780</a></div>
+<div class="declaration struct" id="Parser">
+<span class="name">Parser</span> <span class="kind">Structs</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L4819" class="source-link" target="_blank">🔗 root.zig:4819</a></div>
+<h2>Enums</h2>
+<div class="declaration enum" id="ScriptValueType">
+<span class="name">ScriptValueType</span> <span class="kind">Enums</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L346" class="source-link" target="_blank">🔗 root.zig:346</a></div>
+<div class="declaration enum" id="GrammarKind">
+<span class="name">GrammarKind</span> <span class="kind">Enums</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L723" class="source-link" target="_blank">🔗 root.zig:723</a></div>
+<div class="declaration enum" id="ParseSeverity">
+<span class="name">ParseSeverity</span> <span class="kind">Enums</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L804" class="source-link" target="_blank">🔗 root.zig:804</a></div>
+<div class="declaration enum" id="Opcode">
+<span class="name">Opcode</span> <span class="kind">Enums</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1611" class="source-link" target="_blank">🔗 root.zig:1611</a></div>
+<div class="declaration enum" id="SyntaxNodeKind">
+<span class="name">SyntaxNodeKind</span> <span class="kind">Enums</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1659" class="source-link" target="_blank">🔗 root.zig:1659</a></div>
+<div class="declaration enum" id="PatternQuantifier">
+<span class="name">PatternQuantifier</span> <span class="kind">Enums</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3385" class="source-link" target="_blank">🔗 root.zig:3385</a></div>
+<div class="declaration enum" id="PatternElementKind">
+<span class="name">PatternElementKind</span> <span class="kind">Enums</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3393" class="source-link" target="_blank">🔗 root.zig:3393</a></div>
+<div class="declaration enum" id="PatternClass">
+<span class="name">PatternClass</span> <span class="kind">Enums</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3401" class="source-link" target="_blank">🔗 root.zig:3401</a></div>
+<div class="declaration enum" id="PatternMatcherKind">
+<span class="name">PatternMatcherKind</span> <span class="kind">Enums</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3460" class="source-link" target="_blank">🔗 root.zig:3460</a></div>
+<h2>Unions</h2>
+<div class="declaration union" id="ScriptValue">
+<span class="name">ScriptValue</span> <span class="kind">Unions</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L360" class="source-link" target="_blank">🔗 root.zig:360</a></div>
+<h2>Error Sets</h2>
+<div class="declaration error-set" id="ExecutionError">
+<span class="name">ExecutionError</span> <span class="kind">Error Sets</span><span class="badge badge-pub">pub</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L85" class="source-link" target="_blank">🔗 root.zig:85</a></div>
+<div class="declaration error-set" id="PatternError">
+<span class="name">PatternError</span> <span class="kind">Error Sets</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3378" class="source-link" target="_blank">🔗 root.zig:3378</a></div>
+<h2>Variables</h2>
+<div class="declaration variable" id="std">
+<span class="name">std</span> <span class="kind">Variables</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L1" class="source-link" target="_blank">🔗 root.zig:1</a></div>
+<div class="declaration variable" id="build_options">
+<span class="name">build_options</span> <span class="kind">Variables</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L2" class="source-link" target="_blank">🔗 root.zig:2</a></div>
+<div class="declaration variable" id="editor_helper_allocator">
+<span class="name">editor_helper_allocator</span> <span class="kind">Variables</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L665" class="source-link" target="_blank">🔗 root.zig:665</a></div>
+<div class="declaration variable" id="max_pattern_captures">
+<span class="name">max_pattern_captures</span> <span class="kind">Variables</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L3376" class="source-link" target="_blank">🔗 root.zig:3376</a></div>
+<div class="declaration variable" id="active_vm">
+<span class="name">active_vm</span> <span class="kind">Variables</span><a href="https://github.com/ghostkellz/ghostlang/blob/main/src/root.zig#L4065" class="source-link" target="_blank">🔗 root.zig:4065</a></div>
+</div>
+</div>
+<script>
+document.getElementById('search').addEventListener('input', function(e) {
+  const query = e.target.value.toLowerCase();
+  const navItems = document.querySelectorAll('.nav-item');
+  const declarations = document.querySelectorAll('.declaration');
+  const sections = document.querySelectorAll('.nav-section');
+
+  navItems.forEach(function(item) {
+    const text = item.textContent.toLowerCase();
+    item.style.display = text.includes(query) ? 'block' : 'none';
+  });
+
+  declarations.forEach(function(decl) {
+    const name = decl.querySelector('.name').textContent.toLowerCase();
+    decl.style.display = name.includes(query) ? 'block' : 'none';
+  });
+
+  sections.forEach(function(section) {
+    const visibleItems = section.querySelectorAll('.nav-item[style*="block"], .nav-item:not([style])');
+    section.style.display = (query === '' || visibleItems.length > 0) ? 'block' : 'none';
+  });
+});
+
+// Syntax highlighting for Zig code
+function highlightZig(code) {
+  const keywords = ['const', 'var', 'pub', 'fn', 'struct', 'enum', 'union', 'if', 'else', 'while', 'for', 'return', 'try', 'catch', 'defer', 'errdefer', 'switch', 'and', 'or', 'null', 'undefined', 'true', 'false', 'test', 'comptime', 'inline', 'export', 'extern', 'packed', 'align', 'volatile', 'allowzero', 'async', 'await', 'suspend', 'resume', 'cancel'];
+  const types = ['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'f32', 'f64', 'bool', 'usize', 'isize', 'c_short', 'c_ushort', 'c_int', 'c_uint', 'c_long', 'c_ulong', 'c_longlong', 'c_ulonglong', 'c_longdouble', 'c_void', 'void', 'noreturn', 'type', 'anyerror', 'anyframe', 'anytype'];
+
+  let result = code;
+
+  // Highlight strings
+  result = result.replace(/"([^"\\\\]|\\\\.)*"/g, '<span class="zig-string">$&</span>');
+  result = result.replace(/'([^'\\\\]|\\\\.)'/g, '<span class="zig-string">$&</span>');
+
+  // Highlight numbers
+  result = result.replace(/\\b\\d+(\\.\\d+)?\\b/g, '<span class="zig-number">$&</span>');
+
+  // Highlight comments
+  result = result.replace(/\\/\\/.*$/gm, '<span class="zig-comment">$&</span>');
+
+  // Highlight keywords
+  keywords.forEach(function(keyword) {
+    const regex = new RegExp('\\\\b' + keyword + '\\\\b', 'g');
+    result = result.replace(regex, '<span class="zig-keyword">' + keyword + '</span>');
+  });
+
+  // Highlight types
+  types.forEach(function(type) {
+    const regex = new RegExp('\\\\b' + type + '\\\\b', 'g');
+    result = result.replace(regex, '<span class="zig-type">' + type + '</span>');
+  });
+
+  return result;
+}
+
+// Apply syntax highlighting on page load
+document.addEventListener('DOMContentLoaded', function() {
+  const codeBlocks = document.querySelectorAll('code');
+  codeBlocks.forEach(function(block) {
+    if (block.textContent.includes('const') || block.textContent.includes('fn') || block.textContent.includes('pub')) {
+      block.innerHTML = highlightZig(block.textContent);
+    }
+  });
+});
+</script>
+</body>
+</html>
