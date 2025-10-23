@@ -2281,7 +2281,10 @@ pub const VM = struct {
                     if (array_value_ptr.* != .array) return ExecutionError.TypeError;
                     try self.ensureArrayUnique(array_value_ptr);
                     const value_idx = operandIndex(value_reg);
+                    // arrayAppend takes ownership of the value
                     try self.arrayAppend(array_value_ptr.*.array, self.registers[value_idx]);
+                    // Clear the register to prevent double-free
+                    self.registers[value_idx] = .{ .nil = {} };
                 },
                 .iterator_init => {
                     const dest_reg = instr.operands[0];
@@ -3367,9 +3370,9 @@ pub const VM = struct {
     }
 
     fn arrayAppend(self: *VM, array: *ScriptArray, value: ScriptValue) ExecutionError!void {
-        const value_copy = try self.copyValue(value);
-        array.items.append(self.allocator, value_copy) catch |err| {
-            var tmp = value_copy;
+        // Take ownership of value - don't copy again (value is already copied when loaded into register)
+        array.items.append(self.allocator, value) catch |err| {
+            var tmp = value;
             tmp.deinit(self.allocator);
             if (err == error.OutOfMemory) {
                 return ExecutionError.OutOfMemory;
