@@ -99,17 +99,52 @@ fn reportRuntimeError(engine: *ghostlang.ScriptEngine, script: ?*ghostlang.Scrip
     const memory_related = err == ghostlang.ExecutionError.MemoryLimitExceeded or err == ghostlang.ExecutionError.OutOfMemory;
     if (!memory_related or script == null) return;
 
-    var buffer = std.ArrayList(u8).init(engine.config.allocator);
+    var buffer = std.array_list.Managed(u8).init(engine.config.allocator);
     defer buffer.deinit();
 
-    const writer = buffer.writer();
+    const Writer = struct {
+        list: *std.array_list.Managed(u8),
+
+        pub const Error = std.mem.Allocator.Error;
+
+        pub fn writeAll(self: @This(), bytes: []const u8) Error!void {
+            try self.list.appendSlice(bytes);
+        }
+
+        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) Error!void {
+            const ArgsType = @TypeOf(args);
+            const args_type_info = @typeInfo(ArgsType);
+            if (args_type_info != .@"struct") {
+                @compileError("expected tuple or struct argument, found " ++ @typeName(ArgsType));
+            }
+
+            // Use bufPrint with a temporary buffer, then append
+            var buf: [4096]u8 = undefined;
+            const formatted = std.fmt.bufPrint(&buf, fmt, args) catch |e| switch (e) {
+                error.NoSpaceLeft => {
+                    // If the buffer is too small, use allocPrint instead
+                    const allocator = self.list.allocator;
+                    const dynamic = try std.fmt.allocPrint(allocator, fmt, args);
+                    defer allocator.free(dynamic);
+                    try self.writeAll(dynamic);
+                    return;
+                },
+            };
+            try self.writeAll(formatted);
+        }
+    };
+    const writer = Writer{ .list = &buffer };
+
     const wrote = try script.?.writeMemorySummary(writer);
     if (!wrote or buffer.items.len == 0) return;
 
-    var stderr = std.io.getStdErr().writer();
-    try stderr.writeAll("  memory context:\n");
-    try stderr.writeAll(buffer.items);
-    try stderr.writeAll("  hint: Investigate the references above; release or reuse these values to prevent leaks.\n");
+    const stderr = std.fs.File.stderr();
+    var stderr_buffer: [4096]u8 = undefined;
+    var stderr_writer = stderr.writer(&stderr_buffer);
+    try stderr_writer.interface.writeAll("  memory context:\n");
+    try stderr_writer.interface.writeAll(buffer.items);
+    try stderr_writer.interface.writeAll("  hint: Investigate the references above; release or reuse these values to prevent leaks.\n");
+    try stderr_writer.interface.flush();
 }
 
 fn severityLabel(severity: ghostlang.ParseSeverity) []const u8 {

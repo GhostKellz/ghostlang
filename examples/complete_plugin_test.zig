@@ -19,7 +19,7 @@ pub fn main() !void {
         .modified = false,
     };
 
-    var buffers = try std.ArrayList(*grim_integration.GrimBuffer).initCapacity(allocator, 1);
+    var buffers: std.ArrayList(*grim_integration.GrimBuffer) = try .initCapacity(allocator, 1);
     defer buffers.deinit(allocator);
     try buffers.append(allocator, &mock_buffer);
 
@@ -165,7 +165,7 @@ test "phase 2 integration test" {
         .modified = false,
     };
 
-    var buffers = try std.ArrayList(*grim_integration.GrimBuffer).initCapacity(allocator, 1);
+    var buffers: std.ArrayList(*grim_integration.GrimBuffer) = try .initCapacity(allocator, 1);
     defer buffers.deinit(allocator);
     try buffers.append(allocator, &mock_buffer);
 

@@ -793,7 +793,7 @@ pub const GrammarRegistry = struct {
     }
 
     pub fn list(self: *GrammarRegistry, allocator: std.mem.Allocator) ![]GrammarInfo {
-        var out = std.ArrayList(GrammarInfo).init(allocator);
+        var out = std.array_list.Managed(GrammarInfo).init(allocator);
         errdefer out.deinit();
 
         var it = self.table.iterator();
@@ -996,7 +996,7 @@ pub const ScriptEngine = struct {
     }
 
     pub fn copyDiagnostics(self: *ScriptEngine, allocator: std.mem.Allocator) ExecutionError![]ParseDiagnostic {
-        var list = std.ArrayList(ParseDiagnostic).init(allocator);
+        var list = std.array_list.Managed(ParseDiagnostic).init(allocator);
         errdefer {
             for (list.items) |diag| {
                 allocator.free(diag.message);
@@ -1245,7 +1245,8 @@ pub const ScriptEngine = struct {
     fn getTimeFunction(args: []const ScriptValue) ScriptValue {
         _ = args;
         // This would be gated by deterministic mode in a real implementation
-        const timestamp = std.time.milliTimestamp();
+        const ts = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+        const timestamp = @as(i64, @intCast(ts.sec * 1000 + @divTrunc(ts.nsec, 1_000_000)));
         return .{ .number = @floatFromInt(timestamp) };
     }
 
@@ -1880,7 +1881,7 @@ pub const PluginManager = struct {
     }
 
     pub fn list(self: *PluginManager, allocator: std.mem.Allocator) ![]PluginDescriptor {
-        var out = std.ArrayList(PluginDescriptor).init(allocator);
+        var out = std.array_list.Managed(PluginDescriptor).init(allocator);
         errdefer {
             for (out.items) |desc| {
                 allocator.free(desc.name);
@@ -2116,14 +2117,17 @@ pub const VM = struct {
         active_vm = self;
         defer active_vm = previous_vm;
 
-        self.start_time = std.time.milliTimestamp();
+        const ts_start = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+        self.start_time = @as(i64, @intCast(ts_start.sec * 1000 + @divTrunc(ts_start.nsec, 1_000_000)));
         self.instruction_count = 0;
 
         while (self.pc < self.code.len) {
             // Check timeout every 100 instructions to avoid performance overhead
             if (self.instruction_count % 100 == 0) {
                 if (self.engine.config.execution_timeout_ms > 0) {
-                    const elapsed = std.time.milliTimestamp() - self.start_time;
+                    const ts_now = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+                    const now_ms = @as(i64, @intCast(ts_now.sec * 1000 + @divTrunc(ts_now.nsec, 1_000_000)));
+                    const elapsed = now_ms - self.start_time;
                     if (elapsed > self.engine.config.execution_timeout_ms) {
                         return ExecutionError.ExecutionTimeout;
                     }
@@ -4400,7 +4404,8 @@ pub const BuiltinFunctions = struct {
             var seed: u64 = undefined;
             std.posix.getrandom(std.mem.asBytes(&seed)) catch {
                 // Fallback to timestamp-based seed
-                seed = @as(u64, @intCast(@abs(std.time.timestamp())));
+                const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+                seed = @as(u64, @intCast(ts.sec));
             };
             break :blk seed;
         });
@@ -5356,7 +5361,7 @@ pub const EditorAPI = struct {
 
     pub fn init(allocator: std.mem.Allocator) !EditorAPI {
         var api = EditorAPI{
-            .lines = std.ArrayList([]const u8).init(allocator),
+            .lines = std.array_list.Managed([]const u8).init(allocator),
             .cursor_line = 0,
             .cursor_col = 0,
             .selection_start = 0,
@@ -7767,7 +7772,8 @@ fn groveParseGhostlang(integration: *GroveIntegration, source: []const u8, diagn
         return ExecutionError.ParseError;
     }
 
-    const start_ns = std.time.nanoTimestamp();
+    const ts_start = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+    const start_ns = @as(i64, @intCast(ts_start.sec * 1_000_000_000 + ts_start.nsec));
     var parser = Parser.init(integration.allocator, source);
     const parsed = parser.parse() catch |err| {
         if (err == error.OutOfMemory) {
@@ -7778,7 +7784,9 @@ fn groveParseGhostlang(integration: *GroveIntegration, source: []const u8, diagn
         return ExecutionError.ParseError;
     };
 
-    const elapsed_raw = std.time.nanoTimestamp() - start_ns;
+    const ts_end = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+    const end_ns = @as(i64, @intCast(ts_end.sec * 1_000_000_000 + ts_end.nsec));
+    const elapsed_raw = end_ns - start_ns;
     const elapsed_ns: u64 = if (elapsed_raw < 0) 0 else @as(u64, @intCast(elapsed_raw));
 
     const tree = SyntaxTree.initFromInstructions(integration.allocator, parsed.instructions, parsed.constants.len) catch |err| {
