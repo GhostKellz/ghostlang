@@ -1,0 +1,177 @@
+-- ERC20-Compatible Token Contract
+-- GhostLang v0.2.3+ Smart Contract
+--
+-- Features:
+-- - Total supply tracking
+-- - Balance management
+-- - Transfer with events
+-- - Approval/TransferFrom pattern
+-- - Owner mint capability
+
+local balances = {}
+local allowances = {}
+local total_supply = 0
+local owner = nil
+local token_name = "Ghost Token"
+local token_symbol = "GHOST"
+local decimals = 18
+
+-- Constructor - called once on deployment
+function init(initial_supply)
+    owner = web3.getCaller()
+    total_supply = initial_supply or 1000000
+    balances[owner] = total_supply
+
+    emit("TokenCreated", {
+        owner = owner,
+        name = token_name,
+        symbol = token_symbol,
+        total_supply = total_supply
+    })
+end
+
+-- View functions (don't modify state)
+
+function name()
+    return token_name
+end
+
+function symbol()
+    return token_symbol
+end
+
+function totalSupply()
+    return total_supply
+end
+
+function balanceOf(account)
+    return balances[account] or 0
+end
+
+function allowance(owner_addr, spender)
+    if allowances[owner_addr] then
+        return allowances[owner_addr][spender] or 0
+    end
+    return 0
+end
+
+-- State-modifying functions
+
+function transfer(to, amount)
+    local from = web3.getCaller()
+
+    -- Validation
+    web3.require(amount > 0, "Amount must be positive")
+    web3.require(to ~= from, "Cannot transfer to self")
+    web3.require(balances[from] >= amount, "Insufficient balance")
+
+    -- Execute transfer
+    balances[from] = balances[from] - amount
+    balances[to] = (balances[to] or 0) + amount
+
+    -- Emit event
+    emit("Transfer", {
+        from = from,
+        to = to,
+        amount = amount
+    })
+
+    return true
+end
+
+function approve(spender, amount)
+    local owner_addr = web3.getCaller()
+
+    web3.require(amount >= 0, "Amount cannot be negative")
+
+    -- Initialize allowances for owner if needed
+    if not allowances[owner_addr] then
+        allowances[owner_addr] = {}
+    end
+
+    allowances[owner_addr][spender] = amount
+
+    emit("Approval", {
+        owner = owner_addr,
+        spender = spender,
+        amount = amount
+    })
+
+    return true
+end
+
+function transferFrom(from, to, amount)
+    local spender = web3.getCaller()
+
+    -- Check allowance
+    local allowed = allowance(from, spender)
+    web3.require(allowed >= amount, "Allowance exceeded")
+
+    -- Check balance
+    web3.require(balances[from] >= amount, "Insufficient balance")
+    web3.require(amount > 0, "Amount must be positive")
+
+    -- Update allowance
+    allowances[from][spender] = allowed - amount
+
+    -- Execute transfer
+    balances[from] = balances[from] - amount
+    balances[to] = (balances[to] or 0) + amount
+
+    emit("Transfer", {
+        from = from,
+        to = to,
+        amount = amount
+    })
+
+    return true
+end
+
+-- Owner-only functions
+
+function mint(to, amount)
+    web3.require(web3.getCaller() == owner, "Only owner can mint")
+    web3.require(amount > 0, "Amount must be positive")
+
+    balances[to] = (balances[to] or 0) + amount
+    total_supply = total_supply + amount
+
+    emit("Mint", {
+        to = to,
+        amount = amount,
+        new_supply = total_supply
+    })
+
+    return true
+end
+
+function burn(amount)
+    local from = web3.getCaller()
+
+    web3.require(amount > 0, "Amount must be positive")
+    web3.require(balances[from] >= amount, "Insufficient balance")
+
+    balances[from] = balances[from] - amount
+    total_supply = total_supply - amount
+
+    emit("Burn", {
+        from = from,
+        amount = amount,
+        new_supply = total_supply
+    })
+
+    return true
+end
+
+function transferOwnership(new_owner)
+    web3.require(web3.getCaller() == owner, "Only owner")
+    web3.require(new_owner ~= owner, "Already owner")
+
+    local old_owner = owner
+    owner = new_owner
+
+    emit("OwnershipTransferred", {
+        from = old_owner,
+        to = new_owner
+    })
+end

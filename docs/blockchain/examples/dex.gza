@@ -1,0 +1,413 @@
+-- Automated Market Maker (AMM) DEX Contract
+-- GhostLang v0.2.3+
+-- Uniswap V2-inspired constant product AMM
+--
+-- Features:
+-- - Liquidity pools for token pairs
+-- - Automated price discovery (x * y = k)
+-- - LP tokens for liquidity providers
+-- - Swap with 0.3% fee
+-- - Slippage protection
+-- - TWAP price oracle
+
+local pools = {} -- token_pair_hash -> pool_info
+local user_liquidity = {} -- user -> {pool_hash -> lp_amount}
+local fee_rate = 30 -- 0.3% (30 basis points / 10000)
+local owner = nil
+local total_volume = 0
+
+-- Pool info structure
+-- {
+--   token0: address,
+--   token1: address,
+--   reserve0: u64,
+--   reserve1: u64,
+--   total_liquidity: u64,
+--   price0_cumulative: u256,
+--   price1_cumulative: u256,
+--   last_update: u64
+-- }
+
+function init()
+    owner = web3.getCaller()
+
+    emit("DEXInitialized", {
+        owner = owner,
+        fee_rate = fee_rate
+    })
+end
+
+-- Pool management
+
+function createPool(token0, token1)
+    web3.require(token0 ~= token1, "Identical tokens")
+    web3.require(token0 ~= nil and token1 ~= nil, "Invalid token address")
+
+    -- Ensure token0 < token1 for consistency
+    if token0 > token1 then
+        token0, token1 = token1, token0
+    end
+
+    local pool_hash = getPoolHash(token0, token1)
+    web3.require(pools[pool_hash] == nil, "Pool already exists")
+
+    pools[pool_hash] = {
+        token0 = token0,
+        token1 = token1,
+        reserve0 = 0,
+        reserve1 = 0,
+        total_liquidity = 0,
+        price0_cumulative = 0,
+        price1_cumulative = 0,
+        last_update = web3.getTimestamp()
+    }
+
+    emit("PoolCreated", {
+        token0 = token0,
+        token1 = token1,
+        pool_hash = pool_hash
+    })
+
+    return pool_hash
+end
+
+function addLiquidity(token0, token1, amount0, amount1, min_liquidity)
+    local provider = web3.getCaller()
+
+    -- Normalize token order
+    if token0 > token1 then
+        token0, token1 = token1, token0
+        amount0, amount1 = amount1, amount0
+    end
+
+    local pool_hash = getPoolHash(token0, token1)
+    web3.require(pools[pool_hash] ~= nil, "Pool does not exist")
+
+    local pool = pools[pool_hash]
+
+    -- Calculate liquidity to mint
+    local liquidity = 0
+    if pool.total_liquidity == 0 then
+        -- Initial liquidity: geometric mean
+        liquidity = sqrt(amount0 * amount1)
+        web3.require(liquidity > 0, "Insufficient liquidity minted")
+    else
+        -- Proportional liquidity
+        local liquidity0 = (amount0 * pool.total_liquidity) / pool.reserve0
+        local liquidity1 = (amount1 * pool.total_liquidity) / pool.reserve1
+        liquidity = min(liquidity0, liquidity1)
+    end
+
+    web3.require(liquidity >= min_liquidity, "Slippage too high")
+
+    -- Update reserves
+    updateReserves(pool, pool.reserve0 + amount0, pool.reserve1 + amount1)
+
+    -- Update liquidity
+    pool.total_liquidity = pool.total_liquidity + liquidity
+
+    -- Track user liquidity
+    if not user_liquidity[provider] then
+        user_liquidity[provider] = {}
+    end
+    local user_pool_liq = user_liquidity[provider][pool_hash] or 0
+    user_liquidity[provider][pool_hash] = user_pool_liq + liquidity
+
+    -- TODO: Transfer tokens from provider
+    -- token0.transferFrom(provider, this, amount0)
+    -- token1.transferFrom(provider, this, amount1)
+
+    emit("LiquidityAdded", {
+        provider = provider,
+        token0 = token0,
+        token1 = token1,
+        amount0 = amount0,
+        amount1 = amount1,
+        liquidity = liquidity
+    })
+
+    return liquidity
+end
+
+function removeLiquidity(token0, token1, liquidity, min_amount0, min_amount1)
+    local provider = web3.getCaller()
+
+    -- Normalize token order
+    if token0 > token1 then
+        token0, token1 = token1, token0
+        min_amount0, min_amount1 = min_amount1, min_amount0
+    end
+
+    local pool_hash = getPoolHash(token0, token1)
+    web3.require(pools[pool_hash] ~= nil, "Pool does not exist")
+
+    local pool = pools[pool_hash]
+
+    -- Check user has enough liquidity
+    web3.require(user_liquidity[provider] ~= nil, "No liquidity")
+    local user_liq = user_liquidity[provider][pool_hash] or 0
+    web3.require(user_liq >= liquidity, "Insufficient liquidity")
+
+    -- Calculate amounts to withdraw
+    local amount0 = (liquidity * pool.reserve0) / pool.total_liquidity
+    local amount1 = (liquidity * pool.reserve1) / pool.total_liquidity
+
+    web3.require(amount0 >= min_amount0, "Slippage too high on token0")
+    web3.require(amount1 >= min_amount1, "Slippage too high on token1")
+
+    -- Update state
+    updateReserves(pool, pool.reserve0 - amount0, pool.reserve1 - amount1)
+    pool.total_liquidity = pool.total_liquidity - liquidity
+    user_liquidity[provider][pool_hash] = user_liq - liquidity
+
+    -- TODO: Transfer tokens to provider
+    -- token0.transfer(provider, amount0)
+    -- token1.transfer(provider, amount1)
+
+    emit("LiquidityRemoved", {
+        provider = provider,
+        token0 = token0,
+        token1 = token1,
+        amount0 = amount0,
+        amount1 = amount1,
+        liquidity = liquidity
+    })
+
+    return amount0, amount1
+end
+
+-- Swapping
+
+function swap(token_in, token_out, amount_in, min_amount_out)
+    local trader = web3.getCaller()
+
+    web3.require(token_in ~= token_out, "Identical tokens")
+    web3.require(amount_in > 0, "Amount must be positive")
+
+    -- Get pool (normalize order)
+    local token0, token1 = token_in, token_out
+    if token0 > token1 then
+        token0, token1 = token1, token0
+    end
+
+    local pool_hash = getPoolHash(token0, token1)
+    web3.require(pools[pool_hash] ~= nil, "Pool does not exist")
+
+    local pool = pools[pool_hash]
+
+    -- Determine which token is being swapped
+    local is_token0_in = token_in == pool.token0
+    local reserve_in = is_token0_in and pool.reserve0 or pool.reserve1
+    local reserve_out = is_token0_in and pool.reserve1 or pool.reserve0
+
+    -- Calculate output amount (with 0.3% fee)
+    local amount_in_with_fee = amount_in * (10000 - fee_rate)
+    local numerator = amount_in_with_fee * reserve_out
+    local denominator = (reserve_in * 10000) + amount_in_with_fee
+    local amount_out = numerator / denominator
+
+    web3.require(amount_out >= min_amount_out, "Slippage too high")
+    web3.require(amount_out < reserve_out, "Insufficient liquidity")
+
+    -- Update reserves
+    local new_reserve_in = reserve_in + amount_in
+    local new_reserve_out = reserve_out - amount_out
+
+    if is_token0_in then
+        updateReserves(pool, new_reserve_in, new_reserve_out)
+    else
+        updateReserves(pool, new_reserve_out, new_reserve_in)
+    end
+
+    -- Track volume
+    total_volume = total_volume + amount_in
+
+    -- TODO: Transfer tokens
+    -- token_in.transferFrom(trader, this, amount_in)
+    -- token_out.transfer(trader, amount_out)
+
+    emit("Swap", {
+        trader = trader,
+        token_in = token_in,
+        token_out = token_out,
+        amount_in = amount_in,
+        amount_out = amount_out,
+        fee = (amount_in * fee_rate) / 10000
+    })
+
+    return amount_out
+end
+
+function swapExactTokensForTokens(path, amount_in, min_amount_out)
+    web3.require(#path >= 2, "Invalid path")
+
+    local amounts = {}
+    amounts[1] = amount_in
+
+    -- Calculate output for each swap in path
+    for i = 1, #path - 1 do
+        local token_in = path[i]
+        local token_out = path[i + 1]
+
+        local pool_hash = getPoolHash(token_in, token_out)
+        local pool = pools[pool_hash]
+        web3.require(pool ~= nil, "Pool does not exist")
+
+        local is_token0_in = token_in == pool.token0
+        local reserve_in = is_token0_in and pool.reserve0 or pool.reserve1
+        local reserve_out = is_token0_in and pool.reserve1 or pool.reserve0
+
+        local amount_in_current = amounts[i]
+        local amount_out_current = getAmountOut(amount_in_current, reserve_in, reserve_out)
+
+        amounts[i + 1] = amount_out_current
+    end
+
+    local final_amount = amounts[#amounts]
+    web3.require(final_amount >= min_amount_out, "Slippage too high")
+
+    -- Execute swaps
+    for i = 1, #path - 1 do
+        swap(path[i], path[i + 1], amounts[i], 0)
+    end
+
+    return final_amount
+end
+
+-- View functions
+
+function getReserves(token0, token1)
+    local pool_hash = getPoolHash(token0, token1)
+    local pool = pools[pool_hash]
+
+    if pool == nil then
+        return 0, 0
+    end
+
+    return pool.reserve0, pool.reserve1
+end
+
+function getAmountOut(amount_in, reserve_in, reserve_out)
+    web3.require(amount_in > 0, "Amount must be positive")
+    web3.require(reserve_in > 0 and reserve_out > 0, "Insufficient liquidity")
+
+    local amount_in_with_fee = amount_in * (10000 - fee_rate)
+    local numerator = amount_in_with_fee * reserve_out
+    local denominator = (reserve_in * 10000) + amount_in_with_fee
+
+    return numerator / denominator
+end
+
+function getAmountIn(amount_out, reserve_in, reserve_out)
+    web3.require(amount_out > 0, "Amount must be positive")
+    web3.require(reserve_in > 0 and reserve_out > 0, "Insufficient liquidity")
+
+    local numerator = reserve_in * amount_out * 10000
+    local denominator = (reserve_out - amount_out) * (10000 - fee_rate)
+
+    return (numerator / denominator) + 1
+end
+
+function getPrice(token0, token1)
+    local pool_hash = getPoolHash(token0, token1)
+    local pool = pools[pool_hash]
+
+    if pool == nil or pool.reserve0 == 0 or pool.reserve1 == 0 then
+        return 0
+    end
+
+    -- Price of token0 in terms of token1
+    return (pool.reserve1 * 1e18) / pool.reserve0
+end
+
+function getUserLiquidity(user, token0, token1)
+    local pool_hash = getPoolHash(token0, token1)
+
+    if user_liquidity[user] == nil then
+        return 0
+    end
+
+    return user_liquidity[user][pool_hash] or 0
+end
+
+function getTotalVolume()
+    return total_volume
+end
+
+-- Internal functions
+
+function getPoolHash(token0, token1)
+    -- Ensure consistent ordering
+    if token0 > token1 then
+        token0, token1 = token1, token0
+    end
+
+    return web3.hash(token0 .. token1)
+end
+
+function updateReserves(pool, reserve0, reserve1)
+    local now = web3.getTimestamp()
+    local time_elapsed = now - pool.last_update
+
+    if time_elapsed > 0 and pool.reserve0 > 0 and pool.reserve1 > 0 then
+        -- Update price cumulative (for TWAP)
+        pool.price0_cumulative = pool.price0_cumulative +
+            ((pool.reserve1 * 1e18) / pool.reserve0) * time_elapsed
+        pool.price1_cumulative = pool.price1_cumulative +
+            ((pool.reserve0 * 1e18) / pool.reserve1) * time_elapsed
+    end
+
+    pool.reserve0 = reserve0
+    pool.reserve1 = reserve1
+    pool.last_update = now
+
+    emit("ReservesUpdated", {
+        reserve0 = reserve0,
+        reserve1 = reserve1
+    })
+end
+
+function sqrt(x)
+    if x == 0 then return 0 end
+
+    local z = (x + 1) / 2
+    local y = x
+
+    while z < y do
+        y = z
+        z = (x / z + z) / 2
+    end
+
+    return y
+end
+
+function min(a, b)
+    return a < b and a or b
+end
+
+-- Admin functions
+
+function updateFeeRate(new_rate)
+    web3.require(web3.getCaller() == owner, "Only owner")
+    web3.require(new_rate <= 1000, "Fee too high") -- Max 10%
+
+    local old_rate = fee_rate
+    fee_rate = new_rate
+
+    emit("FeeRateUpdated", {
+        old_rate = old_rate,
+        new_rate = new_rate
+    })
+end
+
+function transferOwnership(new_owner)
+    web3.require(web3.getCaller() == owner, "Only owner")
+
+    local old_owner = owner
+    owner = new_owner
+
+    emit("OwnershipTransferred", {
+        from = old_owner,
+        to = new_owner
+    })
+end

@@ -1,0 +1,456 @@
+-- DAO Governance Contract
+-- GhostLang v0.2.3+
+-- Decentralized Autonomous Organization with voting and proposals
+--
+-- Features:
+-- - Proposal creation with description and executable actions
+-- - Voting with governance token weight
+-- - Quorum requirements
+-- - Time-locked execution
+-- - Treasury management
+-- - Delegation support
+
+local proposals = {}
+local next_proposal_id = 1
+local members = {} -- address -> member_info
+local treasury_balance = 0
+local governance_token = nil -- ERC20 token address
+local owner = nil
+
+-- Configuration
+local voting_period = 86400 * 7 -- 7 days
+local execution_delay = 86400 * 2 -- 2 days timelock
+local quorum_votes = 1000000 -- minimum votes to pass
+local proposal_threshold = 10000 -- tokens needed to create proposal
+
+-- Proposal states
+local ProposalState = {
+    Pending = 0,
+    Active = 1,
+    Defeated = 2,
+    Succeeded = 3,
+    Queued = 4,
+    Executed = 5,
+    Cancelled = 6
+}
+
+-- Member info structure
+-- {
+--   voting_power: u64,
+--   delegated_to: address?,
+--   proposals_created: u64,
+--   votes_cast: u64
+-- }
+
+-- Proposal structure
+-- {
+--   id: u64,
+--   proposer: address,
+--   description: string,
+--   targets: [address],
+--   values: [u64],
+--   calldatas: [string],
+--   start_block: u64,
+--   end_block: u64,
+--   for_votes: u64,
+--   against_votes: u64,
+--   abstain_votes: u64,
+--   voters: {address -> vote_type},
+--   cancelled: bool,
+--   executed: bool,
+--   eta: u64 -- execution time
+-- }
+
+function init(token_address)
+    owner = web3.getCaller()
+    governance_token = token_address
+
+    emit("DAOInitialized", {
+        owner = owner,
+        token = governance_token,
+        voting_period = voting_period,
+        quorum = quorum_votes
+    })
+end
+
+-- Proposal creation
+
+function propose(description, targets, values, calldatas)
+    local proposer = web3.getCaller()
+
+    -- Check proposer has enough tokens
+    local voting_power = getVotingPower(proposer)
+    web3.require(voting_power >= proposal_threshold, "Below proposal threshold")
+
+    -- Validate inputs
+    web3.require(#targets > 0, "Must provide actions")
+    web3.require(#targets == #values, "Proposal function information arity mismatch")
+    web3.require(#targets == #calldatas, "Proposal function information arity mismatch")
+    web3.require(#description > 0, "Description required")
+
+    local proposal_id = next_proposal_id
+    next_proposal_id = next_proposal_id + 1
+
+    local now = web3.getBlockNumber()
+
+    proposals[proposal_id] = {
+        id = proposal_id,
+        proposer = proposer,
+        description = description,
+        targets = targets,
+        values = values,
+        calldatas = calldatas,
+        start_block = now + 1,
+        end_block = now + voting_period,
+        for_votes = 0,
+        against_votes = 0,
+        abstain_votes = 0,
+        voters = {},
+        cancelled = false,
+        executed = false,
+        eta = 0
+    }
+
+    -- Track member activity
+    if not members[proposer] then
+        members[proposer] = {
+            voting_power = voting_power,
+            delegated_to = nil,
+            proposals_created = 0,
+            votes_cast = 0
+        }
+    end
+    members[proposer].proposals_created = members[proposer].proposals_created + 1
+
+    emit("ProposalCreated", {
+        proposal_id = proposal_id,
+        proposer = proposer,
+        description = description,
+        start_block = proposals[proposal_id].start_block,
+        end_block = proposals[proposal_id].end_block
+    })
+
+    return proposal_id
+end
+
+-- Voting
+
+function castVote(proposal_id, support)
+    local voter = web3.getCaller()
+
+    web3.require(proposals[proposal_id] ~= nil, "Proposal does not exist")
+
+    local proposal = proposals[proposal_id]
+    local state = getProposalState(proposal_id)
+
+    web3.require(state == ProposalState.Active, "Voting is closed")
+    web3.require(proposal.voters[voter] == nil, "Already voted")
+
+    local voting_power = getVotingPower(voter)
+    web3.require(voting_power > 0, "No voting power")
+
+    -- Record vote
+    proposal.voters[voter] = support
+
+    if support == 0 then
+        proposal.against_votes = proposal.against_votes + voting_power
+    elseif support == 1 then
+        proposal.for_votes = proposal.for_votes + voting_power
+    elseif support == 2 then
+        proposal.abstain_votes = proposal.abstain_votes + voting_power
+    else
+        web3.revert("Invalid vote type")
+    end
+
+    -- Track member activity
+    if not members[voter] then
+        members[voter] = {
+            voting_power = voting_power,
+            delegated_to = nil,
+            proposals_created = 0,
+            votes_cast = 0
+        }
+    end
+    members[voter].votes_cast = members[voter].votes_cast + 1
+
+    emit("VoteCast", {
+        voter = voter,
+        proposal_id = proposal_id,
+        support = support,
+        voting_power = voting_power,
+        reason = ""
+    })
+end
+
+function castVoteWithReason(proposal_id, support, reason)
+    castVote(proposal_id, support)
+
+    emit("VoteCastWithReason", {
+        voter = web3.getCaller(),
+        proposal_id = proposal_id,
+        support = support,
+        reason = reason
+    })
+end
+
+-- Proposal execution
+
+function queue(proposal_id)
+    web3.require(proposals[proposal_id] ~= nil, "Proposal does not exist")
+
+    local state = getProposalState(proposal_id)
+    web3.require(state == ProposalState.Succeeded, "Proposal not succeeded")
+
+    local proposal = proposals[proposal_id]
+    local eta = web3.getTimestamp() + execution_delay
+
+    proposal.eta = eta
+
+    emit("ProposalQueued", {
+        proposal_id = proposal_id,
+        eta = eta
+    })
+end
+
+function execute(proposal_id)
+    web3.require(proposals[proposal_id] ~= nil, "Proposal does not exist")
+
+    local proposal = proposals[proposal_id]
+    local state = getProposalState(proposal_id)
+
+    web3.require(state == ProposalState.Queued, "Proposal not queued")
+    web3.require(web3.getTimestamp() >= proposal.eta, "Timelock not expired")
+    web3.require(not proposal.executed, "Already executed")
+
+    proposal.executed = true
+
+    -- Execute proposal actions
+    for i = 1, #proposal.targets do
+        local target = proposal.targets[i]
+        local value = proposal.values[i]
+        local calldata = proposal.calldatas[i]
+
+        -- TODO: Execute external call
+        -- In production: target.call{value: value}(calldata)
+        _ = target
+        _ = value
+        _ = calldata
+
+        web3.require(treasury_balance >= value, "Insufficient treasury")
+        treasury_balance = treasury_balance - value
+    end
+
+    emit("ProposalExecuted", {
+        proposal_id = proposal_id
+    })
+end
+
+function cancel(proposal_id)
+    web3.require(proposals[proposal_id] ~= nil, "Proposal does not exist")
+
+    local proposal = proposals[proposal_id]
+    local caller = web3.getCaller()
+
+    -- Can cancel if: proposer, owner, or proposer no longer meets threshold
+    local can_cancel = caller == proposal.proposer or
+                      caller == owner or
+                      getVotingPower(proposal.proposer) < proposal_threshold
+
+    web3.require(can_cancel, "Cannot cancel")
+    web3.require(not proposal.executed, "Already executed")
+
+    proposal.cancelled = true
+
+    emit("ProposalCancelled", {
+        proposal_id = proposal_id
+    })
+end
+
+-- Delegation
+
+function delegate(delegatee)
+    local delegator = web3.getCaller()
+
+    web3.require(delegatee ~= delegator, "Cannot self-delegate")
+
+    if not members[delegator] then
+        members[delegator] = {
+            voting_power = 0,
+            delegated_to = nil,
+            proposals_created = 0,
+            votes_cast = 0
+        }
+    end
+
+    local old_delegate = members[delegator].delegated_to
+    members[delegator].delegated_to = delegatee
+
+    emit("DelegateChanged", {
+        delegator = delegator,
+        from_delegate = old_delegate,
+        to_delegate = delegatee
+    })
+end
+
+-- View functions
+
+function getProposalState(proposal_id)
+    local proposal = proposals[proposal_id]
+
+    if proposal == nil then
+        return nil
+    end
+
+    if proposal.cancelled then
+        return ProposalState.Cancelled
+    end
+
+    if proposal.executed then
+        return ProposalState.Executed
+    end
+
+    local current_block = web3.getBlockNumber()
+
+    if current_block < proposal.start_block then
+        return ProposalState.Pending
+    end
+
+    if current_block <= proposal.end_block then
+        return ProposalState.Active
+    end
+
+    -- Voting ended, check if succeeded
+    if proposal.for_votes <= proposal.against_votes or proposal.for_votes < quorum_votes then
+        return ProposalState.Defeated
+    end
+
+    if proposal.eta == 0 then
+        return ProposalState.Succeeded
+    end
+
+    if web3.getTimestamp() < proposal.eta then
+        return ProposalState.Queued
+    end
+
+    return ProposalState.Queued -- ready for execution
+end
+
+function getProposal(proposal_id)
+    return proposals[proposal_id]
+end
+
+function getVotingPower(account)
+    -- In production, query governance token balance
+    -- For now, use stored value or delegate's value
+
+    if members[account] then
+        if members[account].delegated_to then
+            return getVotingPower(members[account].delegated_to)
+        end
+        return members[account].voting_power
+    end
+
+    return 0
+end
+
+function hasVoted(proposal_id, account)
+    local proposal = proposals[proposal_id]
+    if not proposal then
+        return false
+    end
+
+    return proposal.voters[account] ~= nil
+end
+
+function getReceipt(proposal_id, voter)
+    local proposal = proposals[proposal_id]
+    if not proposal then
+        return nil
+    end
+
+    local vote_type = proposal.voters[voter]
+    if vote_type == nil then
+        return nil
+    end
+
+    return {
+        has_voted = true,
+        support = vote_type,
+        votes = getVotingPower(voter)
+    }
+end
+
+function getTreasuryBalance()
+    return treasury_balance
+end
+
+function getQuorum()
+    return quorum_votes
+end
+
+function getProposalThreshold()
+    return proposal_threshold
+end
+
+-- Treasury management
+
+function deposit()
+    local amount = web3.getValue() -- msg.value
+    treasury_balance = treasury_balance + amount
+
+    emit("TreasuryDeposit", {
+        from = web3.getCaller(),
+        amount = amount,
+        new_balance = treasury_balance
+    })
+end
+
+-- Admin functions
+
+function updateQuorum(new_quorum)
+    web3.require(web3.getCaller() == owner, "Only owner")
+
+    local old_quorum = quorum_votes
+    quorum_votes = new_quorum
+
+    emit("QuorumUpdated", {
+        old_quorum = old_quorum,
+        new_quorum = new_quorum
+    })
+end
+
+function updateVotingPeriod(new_period)
+    web3.require(web3.getCaller() == owner, "Only owner")
+
+    local old_period = voting_period
+    voting_period = new_period
+
+    emit("VotingPeriodUpdated", {
+        old_period = old_period,
+        new_period = new_period
+    })
+end
+
+function updateProposalThreshold(new_threshold)
+    web3.require(web3.getCaller() == owner, "Only owner")
+
+    local old_threshold = proposal_threshold
+    proposal_threshold = new_threshold
+
+    emit("ProposalThresholdUpdated", {
+        old_threshold = old_threshold,
+        new_threshold = new_threshold
+    })
+end
+
+function transferOwnership(new_owner)
+    web3.require(web3.getCaller() == owner, "Only owner")
+
+    local old_owner = owner
+    owner = new_owner
+
+    emit("OwnershipTransferred", {
+        from = old_owner,
+        to = new_owner
+    })
+end

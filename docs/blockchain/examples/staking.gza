@@ -1,0 +1,316 @@
+-- Staking Contract with Rewards
+-- GhostLang v0.2.3+
+-- Features:
+-- - Token staking with lockup periods
+-- - Proportional reward distribution
+-- - Slashing for early withdrawal
+-- - Validator delegation
+
+local stakes = {} -- address -> stake_info
+local total_staked = 0
+local reward_pool = 0
+local reward_rate = 100 -- 1% per epoch (100 basis points)
+local min_stake = 1000
+local lockup_period = 86400 * 30 -- 30 days in seconds
+local owner = nil
+local current_epoch = 0
+local last_reward_distribution = 0
+local slash_penalty = 1000 -- 10% penalty for early withdrawal
+
+-- Stake info structure (stored in stakes table)
+-- {
+--   amount: u64,
+--   timestamp: u64,
+--   unlock_time: u64,
+--   rewards_earned: u64,
+--   last_claim: u64,
+-- }
+
+function init()
+    owner = web3.getCaller()
+    last_reward_distribution = web3.getTimestamp()
+
+    emit("StakingContractDeployed", {
+        owner = owner,
+        min_stake = min_stake,
+        reward_rate = reward_rate,
+        lockup_period = lockup_period
+    })
+end
+
+-- Staking functions
+
+function stake(amount)
+    local staker = web3.getCaller()
+
+    web3.require(amount >= min_stake, "Below minimum stake")
+    web3.require(amount > 0, "Amount must be positive")
+
+    -- Transfer tokens to contract (assume ERC20-like interface)
+    -- In production, this would call transferFrom on token contract
+
+    local now = web3.getTimestamp()
+
+    if stakes[staker] then
+        -- Add to existing stake
+        local stake_info = stakes[staker]
+
+        -- Claim pending rewards first
+        local pending = calculatePendingRewards(staker)
+        if pending > 0 then
+            stake_info.rewards_earned = stake_info.rewards_earned + pending
+        end
+
+        stake_info.amount = stake_info.amount + amount
+        stake_info.last_claim = now
+        stake_info.unlock_time = now + lockup_period
+    else
+        -- Create new stake
+        stakes[staker] = {
+            amount = amount,
+            timestamp = now,
+            unlock_time = now + lockup_period,
+            rewards_earned = 0,
+            last_claim = now
+        }
+    end
+
+    total_staked = total_staked + amount
+
+    emit("Staked", {
+        staker = staker,
+        amount = amount,
+        total_staked = total_staked,
+        unlock_time = stakes[staker].unlock_time
+    })
+end
+
+function unstake(amount)
+    local staker = web3.getCaller()
+
+    web3.require(stakes[staker] ~= nil, "No stake found")
+
+    local stake_info = stakes[staker]
+    web3.require(stake_info.amount >= amount, "Insufficient stake")
+
+    local now = web3.getTimestamp()
+    local is_locked = now < stake_info.unlock_time
+
+    -- Calculate penalty if withdrawing early
+    local penalty = 0
+    if is_locked then
+        penalty = (amount * slash_penalty) / 10000
+        amount = amount - penalty
+
+        -- Penalty goes to reward pool
+        reward_pool = reward_pool + penalty
+
+        emit("EarlyWithdrawal", {
+            staker = staker,
+            amount = amount,
+            penalty = penalty
+        })
+    end
+
+    -- Claim all pending rewards
+    local pending = calculatePendingRewards(staker)
+    if pending > 0 then
+        stake_info.rewards_earned = stake_info.rewards_earned + pending
+    end
+
+    stake_info.amount = stake_info.amount - amount - penalty
+    stake_info.last_claim = now
+    total_staked = total_staked - amount - penalty
+
+    if stake_info.amount == 0 then
+        stakes[staker] = nil
+    end
+
+    -- Transfer tokens back to staker
+    -- In production: token.transfer(staker, amount)
+
+    emit("Unstaked", {
+        staker = staker,
+        amount = amount,
+        penalty = penalty,
+        remaining_stake = stake_info and stake_info.amount or 0
+    })
+end
+
+function claimRewards()
+    local staker = web3.getCaller()
+
+    web3.require(stakes[staker] ~= nil, "No stake found")
+
+    local stake_info = stakes[staker]
+    local pending = calculatePendingRewards(staker)
+    local total_rewards = stake_info.rewards_earned + pending
+
+    web3.require(total_rewards > 0, "No rewards to claim")
+    web3.require(reward_pool >= total_rewards, "Insufficient reward pool")
+
+    stake_info.rewards_earned = 0
+    stake_info.last_claim = web3.getTimestamp()
+    reward_pool = reward_pool - total_rewards
+
+    -- Transfer rewards to staker
+    -- In production: token.transfer(staker, total_rewards)
+
+    emit("RewardsClaimed", {
+        staker = staker,
+        amount = total_rewards,
+        remaining_pool = reward_pool
+    })
+
+    return total_rewards
+end
+
+-- View functions
+
+function getStake(staker)
+    if stakes[staker] then
+        return stakes[staker].amount
+    end
+    return 0
+end
+
+function getPendingRewards(staker)
+    if not stakes[staker] then
+        return 0
+    end
+
+    local pending = calculatePendingRewards(staker)
+    return stakes[staker].rewards_earned + pending
+end
+
+function getStakeInfo(staker)
+    return stakes[staker]
+end
+
+function getTotalStaked()
+    return total_staked
+end
+
+function getRewardPool()
+    return reward_pool
+end
+
+function getAPY()
+    -- Annual Percentage Yield
+    -- Simplified calculation
+    return reward_rate * 365 / 30 -- epochs per year
+end
+
+function isUnlocked(staker)
+    if not stakes[staker] then
+        return false
+    end
+
+    return web3.getTimestamp() >= stakes[staker].unlock_time
+end
+
+-- Internal functions
+
+function calculatePendingRewards(staker)
+    local stake_info = stakes[staker]
+    if not stake_info then
+        return 0
+    end
+
+    local now = web3.getTimestamp()
+    local time_elapsed = now - stake_info.last_claim
+
+    -- Calculate rewards based on stake proportion and time
+    -- rewards = (stake_amount * reward_rate * time_elapsed) / (total_time_period * 10000)
+
+    local epochs_elapsed = time_elapsed / (86400 * 7) -- weeks as epochs
+    local reward = (stake_info.amount * reward_rate * epochs_elapsed) / 10000
+
+    return reward
+end
+
+-- Admin functions
+
+function addRewards(amount)
+    web3.require(web3.getCaller() == owner, "Only owner")
+    web3.require(amount > 0, "Amount must be positive")
+
+    reward_pool = reward_pool + amount
+
+    emit("RewardsAdded", {
+        amount = amount,
+        new_pool = reward_pool
+    })
+end
+
+function distributeRewards()
+    web3.require(web3.getCaller() == owner, "Only owner")
+
+    local now = web3.getTimestamp()
+    local time_since_last = now - last_reward_distribution
+
+    web3.require(time_since_last >= 86400, "Too soon to distribute")
+
+    -- Rewards are calculated per-staker when they claim
+    -- This just updates the epoch
+    current_epoch = current_epoch + 1
+    last_reward_distribution = now
+
+    emit("RewardsDistributed", {
+        epoch = current_epoch,
+        timestamp = now,
+        total_staked = total_staked,
+        reward_pool = reward_pool
+    })
+end
+
+function updateRewardRate(new_rate)
+    web3.require(web3.getCaller() == owner, "Only owner")
+    web3.require(new_rate > 0 and new_rate <= 10000, "Invalid rate")
+
+    local old_rate = reward_rate
+    reward_rate = new_rate
+
+    emit("RewardRateUpdated", {
+        old_rate = old_rate,
+        new_rate = new_rate
+    })
+end
+
+function updateLockupPeriod(new_period)
+    web3.require(web3.getCaller() == owner, "Only owner")
+    web3.require(new_period >= 86400, "Minimum 1 day")
+
+    local old_period = lockup_period
+    lockup_period = new_period
+
+    emit("LockupPeriodUpdated", {
+        old_period = old_period,
+        new_period = new_period
+    })
+end
+
+function emergencyWithdraw()
+    web3.require(web3.getCaller() == owner, "Only owner")
+
+    -- Owner can withdraw reward pool in emergency
+    local amount = reward_pool
+    reward_pool = 0
+
+    emit("EmergencyWithdraw", {
+        amount = amount
+    })
+end
+
+function transferOwnership(new_owner)
+    web3.require(web3.getCaller() == owner, "Only owner")
+    web3.require(new_owner ~= owner, "Already owner")
+
+    local old_owner = owner
+    owner = new_owner
+
+    emit("OwnershipTransferred", {
+        from = old_owner,
+        to = new_owner
+    })
+end

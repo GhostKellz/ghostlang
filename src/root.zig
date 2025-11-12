@@ -3,6 +3,25 @@ const build_options = @import("build_options");
 
 // By convention, root.zig is the root source file when making a library.
 
+// ============================================================================
+// WEB3 & BLOCKCHAIN INTEGRATION (v0.2.3+)
+// ============================================================================
+
+/// Web3 API for smart contracts (crypto, addresses, ABI, gas)
+pub const web3 = @import("web3.zig");
+
+/// Blockchain VM integration (transaction execution, state management)
+pub const blockchain = @import("blockchain.zig");
+
+/// Gas metering for smart contract execution
+pub const gas_meter = @import("gas_meter.zig");
+
+/// Smart contract testing framework
+pub const contract_test = @import("contract_test.zig");
+
+/// VM optimizations (bytecode optimization, caching, JIT infrastructure)
+pub const vm_opt = @import("vm_opt.zig");
+
 pub const MemoryLimitAllocator = struct {
     backing_allocator: std.mem.Allocator,
     max_bytes: usize,

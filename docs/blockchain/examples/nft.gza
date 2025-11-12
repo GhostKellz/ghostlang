@@ -1,0 +1,254 @@
+-- NFT (Non-Fungible Token) Contract
+-- ERC-721 Compatible
+-- GhostLang v0.2.3+
+
+local owners = {} -- token_id -> owner_address
+local balances = {} -- address -> token_count
+local token_approvals = {} -- token_id -> approved_address
+local operator_approvals = {} -- owner -> operator -> bool
+local token_uris = {} -- token_id -> metadata URI
+local next_token_id = 1
+local contract_owner = nil
+local collection_name = "Ghost NFT"
+local collection_symbol = "GNFT"
+
+function init(name, symbol)
+    contract_owner = web3.getCaller()
+    collection_name = name or collection_name
+    collection_symbol = symbol or collection_symbol
+
+    emit("NFTCollectionCreated", {
+        owner = contract_owner,
+        name = collection_name,
+        symbol = collection_symbol
+    })
+end
+
+-- View functions
+
+function name()
+    return collection_name
+end
+
+function symbol()
+    return collection_symbol
+end
+
+function balanceOf(owner_addr)
+    return balances[owner_addr] or 0
+end
+
+function ownerOf(token_id)
+    local owner = owners[token_id]
+    web3.require(owner ~= nil, "Token does not exist")
+    return owner
+end
+
+function tokenURI(token_id)
+    web3.require(owners[token_id] ~= nil, "Token does not exist")
+    return token_uris[token_id] or ""
+end
+
+function getApproved(token_id)
+    web3.require(owners[token_id] ~= nil, "Token does not exist")
+    return token_approvals[token_id]
+end
+
+function isApprovedForAll(owner_addr, operator)
+    if operator_approvals[owner_addr] then
+        return operator_approvals[owner_addr][operator] or false
+    end
+    return false
+end
+
+function totalSupply()
+    return next_token_id - 1
+end
+
+-- Internal helpers
+
+local function isApprovedOrOwner(spender, token_id)
+    local owner = owners[token_id]
+    if not owner then
+        return false
+    end
+
+    -- Owner can always operate
+    if spender == owner then
+        return true
+    end
+
+    -- Check token-specific approval
+    if token_approvals[token_id] == spender then
+        return true
+    end
+
+    -- Check operator approval
+    if isApprovedForAll(owner, spender) then
+        return true
+    end
+
+    return false
+end
+
+-- State-modifying functions
+
+function approve(to, token_id)
+    local owner = owners[token_id]
+    web3.require(owner ~= nil, "Token does not exist")
+
+    local caller = web3.getCaller()
+    web3.require(
+        caller == owner or isApprovedForAll(owner, caller),
+        "Not authorized"
+    )
+
+    web3.require(to ~= owner, "Cannot approve owner")
+
+    token_approvals[token_id] = to
+
+    emit("Approval", {
+        owner = owner,
+        approved = to,
+        token_id = token_id
+    })
+end
+
+function setApprovalForAll(operator, approved)
+    local owner = web3.getCaller()
+    web3.require(operator ~= owner, "Cannot approve self")
+
+    if not operator_approvals[owner] then
+        operator_approvals[owner] = {}
+    end
+
+    operator_approvals[owner][operator] = approved
+
+    emit("ApprovalForAll", {
+        owner = owner,
+        operator = operator,
+        approved = approved
+    })
+end
+
+function transferFrom(from, to, token_id)
+    local caller = web3.getCaller()
+
+    web3.require(isApprovedOrOwner(caller, token_id), "Not authorized")
+    web3.require(owners[token_id] == from, "From address mismatch")
+    web3.require(to ~= nil and to ~= "", "Invalid recipient")
+
+    -- Clear approvals
+    token_approvals[token_id] = nil
+
+    -- Update balances
+    balances[from] = (balances[from] or 1) - 1
+    balances[to] = (balances[to] or 0) + 1
+
+    -- Update owner
+    owners[token_id] = to
+
+    emit("Transfer", {
+        from = from,
+        to = to,
+        token_id = token_id
+    })
+end
+
+function safeTransferFrom(from, to, token_id, data)
+    transferFrom(from, to, token_id)
+
+    -- TODO: Check if recipient is a contract and call onERC721Received
+    -- For now, just emit event
+    emit("SafeTransfer", {
+        from = from,
+        to = to,
+        token_id = token_id,
+        data = data or ""
+    })
+end
+
+-- Minting functions
+
+function mint(to, uri)
+    local caller = web3.getCaller()
+    web3.require(caller == contract_owner, "Only owner can mint")
+    web3.require(to ~= nil and to ~= "", "Invalid recipient")
+
+    local token_id = next_token_id
+    next_token_id = next_token_id + 1
+
+    owners[token_id] = to
+    balances[to] = (balances[to] or 0) + 1
+    token_uris[token_id] = uri or ""
+
+    emit("Transfer", {
+        from = nil,
+        to = to,
+        token_id = token_id
+    })
+
+    emit("Minted", {
+        to = to,
+        token_id = token_id,
+        uri = uri or ""
+    })
+
+    return token_id
+end
+
+function burn(token_id)
+    local caller = web3.getCaller()
+    web3.require(isApprovedOrOwner(caller, token_id), "Not authorized")
+
+    local owner = owners[token_id]
+
+    -- Clear approvals
+    token_approvals[token_id] = nil
+
+    -- Update balance
+    balances[owner] = (balances[owner] or 1) - 1
+
+    -- Remove owner
+    owners[token_id] = nil
+    token_uris[token_id] = nil
+
+    emit("Transfer", {
+        from = owner,
+        to = nil,
+        token_id = token_id
+    })
+
+    emit("Burned", {
+        from = owner,
+        token_id = token_id
+    })
+end
+
+-- Metadata management
+
+function setTokenURI(token_id, uri)
+    local caller = web3.getCaller()
+    web3.require(caller == contract_owner, "Only owner")
+    web3.require(owners[token_id] ~= nil, "Token does not exist")
+
+    token_uris[token_id] = uri
+
+    emit("TokenURIUpdated", {
+        token_id = token_id,
+        uri = uri
+    })
+end
+
+function transferOwnership(new_owner)
+    web3.require(web3.getCaller() == contract_owner, "Only owner")
+    web3.require(new_owner ~= contract_owner, "Already owner")
+
+    local old_owner = contract_owner
+    contract_owner = new_owner
+
+    emit("OwnershipTransferred", {
+        from = old_owner,
+        to = new_owner
+    })
+end
