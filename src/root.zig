@@ -4421,11 +4421,17 @@ pub const BuiltinFunctions = struct {
         // For production use, consider using a better seed
         var prng = std.Random.DefaultPrng.init(blk: {
             var seed: u64 = undefined;
-            std.posix.getrandom(std.mem.asBytes(&seed)) catch {
-                // Fallback to timestamp-based seed
-                const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
-                seed = @as(u64, @intCast(ts.sec));
-            };
+            const seed_bytes = std.mem.asBytes(&seed);
+            // Try platform-specific entropy source
+            if (@import("builtin").os.tag == .linux) {
+                const rc = std.os.linux.getrandom(seed_bytes.ptr, seed_bytes.len, 0);
+                if (rc == seed_bytes.len) {
+                    break :blk seed;
+                }
+            }
+            // Fallback to timestamp-based seed
+            const ts = std.posix.clock_gettime(.REALTIME) catch unreachable;
+            seed = @as(u64, @intCast(ts.sec)) ^ @as(u64, @intCast(ts.nsec));
             break :blk seed;
         });
         const rand = prng.random();
@@ -5479,21 +5485,27 @@ pub const EditorAPI = struct {
         return .{ .nil = {} };
     }
 
+    fn putGlobalFn(vm: *VM, name: []const u8, func: *const fn ([]const ScriptValue) ScriptValue) !void {
+        const key = try vm.allocator.dupe(u8, name);
+        errdefer vm.allocator.free(key);
+        try vm.globals.put(key, .{ .function = func });
+    }
+
     pub fn registerEditorAPI(vm: *VM) !void {
         // Buffer operations
-        try vm.globals.put(try vm.allocator.dupe(u8, "getLineCount"), .{ .function = &builtin_getLineCount });
-        try vm.globals.put(try vm.allocator.dupe(u8, "getLineText"), .{ .function = &builtin_getLineText });
-        try vm.globals.put(try vm.allocator.dupe(u8, "setLineText"), .{ .function = &builtin_setLineText });
+        try putGlobalFn(vm, "getLineCount", &builtin_getLineCount);
+        try putGlobalFn(vm, "getLineText", &builtin_getLineText);
+        try putGlobalFn(vm, "setLineText", &builtin_setLineText);
 
         // Cursor operations
-        try vm.globals.put(try vm.allocator.dupe(u8, "getCursorLine"), .{ .function = &builtin_getCursorLine });
-        try vm.globals.put(try vm.allocator.dupe(u8, "getCursorCol"), .{ .function = &builtin_getCursorCol });
-        try vm.globals.put(try vm.allocator.dupe(u8, "setCursorPosition"), .{ .function = &builtin_setCursorPosition });
+        try putGlobalFn(vm, "getCursorLine", &builtin_getCursorLine);
+        try putGlobalFn(vm, "getCursorCol", &builtin_getCursorCol);
+        try putGlobalFn(vm, "setCursorPosition", &builtin_setCursorPosition);
 
         // Selection operations
-        try vm.globals.put(try vm.allocator.dupe(u8, "getSelectionStart"), .{ .function = &builtin_getSelectionStart });
-        try vm.globals.put(try vm.allocator.dupe(u8, "getSelectionEnd"), .{ .function = &builtin_getSelectionEnd });
-        try vm.globals.put(try vm.allocator.dupe(u8, "setSelection"), .{ .function = &builtin_setSelection });
+        try putGlobalFn(vm, "getSelectionStart", &builtin_getSelectionStart);
+        try putGlobalFn(vm, "getSelectionEnd", &builtin_getSelectionEnd);
+        try putGlobalFn(vm, "setSelection", &builtin_setSelection);
     }
 };
 

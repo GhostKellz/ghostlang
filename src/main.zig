@@ -3,26 +3,25 @@ const ghostlang = @import("ghostlang");
 
 const max_script_size: usize = 4 * 1024 * 1024; // 4 MiB safety cap
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var exit_code: u8 = 0;
     defer if (exit_code != 0) std.process.exit(exit_code);
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = init.gpa;
+    const arena = init.arena.allocator();
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try init.minimal.args.toSlice(arena);
 
     if (args.len < 2) {
-        try printUsage(args[0]);
+        try printUsage(if (args.len > 0) args[0] else "ghostlang");
         exit_code = 1;
         return;
     }
 
     const script_path = args[1];
 
-    const source = std.fs.cwd().readFileAlloc(
+    const source = std.Io.Dir.cwd().readFileAlloc(
+        init.io,
         script_path,
         allocator,
         std.Io.Limit.limited(max_script_size),
@@ -61,10 +60,12 @@ pub fn main() !void {
     };
     defer result.deinit(engine.tracked_allocator);
 
-    var stdout_file = std.fs.File.stdout();
-    try stdout_file.writeAll("Result: ");
-    try writeValue(stdout_file, result);
-    try stdout_file.writeAll("\n");
+    var buf: [256]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(init.io, &buf);
+    stdout.interface.writeAll("Result: ") catch {};
+    writeValueDebug(result);
+    stdout.interface.writeAll("\n") catch {};
+    stdout.interface.flush() catch {};
 }
 
 fn printUsage(exe_name: []const u8) !void {
@@ -138,13 +139,8 @@ fn reportRuntimeError(engine: *ghostlang.ScriptEngine, script: ?*ghostlang.Scrip
     const wrote = try script.?.writeMemorySummary(writer);
     if (!wrote or buffer.items.len == 0) return;
 
-    const stderr = std.fs.File.stderr();
-    var stderr_buffer: [4096]u8 = undefined;
-    var stderr_writer = stderr.writer(&stderr_buffer);
-    try stderr_writer.interface.writeAll("  memory context:\n");
-    try stderr_writer.interface.writeAll(buffer.items);
-    try stderr_writer.interface.writeAll("  hint: Investigate the references above; release or reuse these values to prevent leaks.\n");
-    try stderr_writer.interface.flush();
+    std.debug.print("  memory context:\n{s}", .{buffer.items});
+    std.debug.print("  hint: Investigate the references above; release or reuse these values to prevent leaks.\n", .{});
 }
 
 fn severityLabel(severity: ghostlang.ParseSeverity) []const u8 {
@@ -155,34 +151,29 @@ fn severityLabel(severity: ghostlang.ParseSeverity) []const u8 {
     };
 }
 
-fn writeValue(file: std.fs.File, value: ghostlang.ScriptValue) !void {
+fn writeValueDebug(value: ghostlang.ScriptValue) void {
     switch (value) {
-        .nil => try file.writeAll("nil"),
-        .boolean => |b| try file.writeAll(if (b) "true" else "false"),
-        .number => |n| {
-            var buf: [64]u8 = undefined;
-            const text = try std.fmt.bufPrint(&buf, "{}", .{n});
-            try file.writeAll(text);
-        },
-        .string => |s| try file.writeAll(s),
-        .function => try file.writeAll("<function>"),
-        .native_function => try file.writeAll("<function>"),
-        .script_function => try file.writeAll("<function>"),
-        .table => try file.writeAll("<table>"),
-        .array => try file.writeAll("<array>"),
-        .iterator => try file.writeAll("<iterator>"),
-        .upvalue => try file.writeAll("<upvalue>"),
+        .nil => std.debug.print("nil", .{}),
+        .boolean => |b| std.debug.print("{s}", .{if (b) "true" else "false"}),
+        .number => |n| std.debug.print("{d}", .{n}),
+        .string => |s| std.debug.print("{s}", .{s}),
+        .function => std.debug.print("<function>", .{}),
+        .native_function => std.debug.print("<function>", .{}),
+        .script_function => std.debug.print("<function>", .{}),
+        .table => std.debug.print("<table>", .{}),
+        .array => std.debug.print("<array>", .{}),
+        .iterator => std.debug.print("<iterator>", .{}),
+        .upvalue => std.debug.print("<upvalue>", .{}),
     }
 }
 
 fn printFunction(args: []const ghostlang.ScriptValue) ghostlang.ScriptValue {
-    var stdout_file = std.fs.File.stdout();
     var index: usize = 0;
     while (index < args.len) : (index += 1) {
-        if (index > 0) stdout_file.writeAll(" ") catch {};
-        writeValue(stdout_file, args[index]) catch {};
+        if (index > 0) std.debug.print(" ", .{});
+        writeValueDebug(args[index]);
     }
-    stdout_file.writeAll("\n") catch {};
+    std.debug.print("\n", .{});
     return if (args.len > 0) args[0] else .{ .nil = {} };
 }
 

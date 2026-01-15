@@ -126,7 +126,7 @@ pub fn main() !void {
         std.debug.print("Test 5: ScriptEngine enforces memory limit\n", .{});
         const config = ghostlang.EngineConfig{
             .allocator = backing_allocator,
-            .memory_limit = 8 * 1024, // 8KB limit
+            .memory_limit = 16 * 1024, // 16KB limit (enough for init, but script will exceed)
             .execution_timeout_ms = 50,
         };
 
@@ -141,12 +141,18 @@ pub fn main() !void {
             \\len(data)
         ;
 
-        var script = try engine.loadScript(source);
+        var script = engine.loadScript(source) catch |err| switch (err) {
+            error.MemoryLimitExceeded => {
+                std.debug.print("  Status: ✓ PASS - memory limit enforced during load\n", .{});
+                return;
+            },
+            else => return err,
+        };
         defer script.deinit();
 
         const final_value = script.run() catch |err| switch (err) {
             error.MemoryLimitExceeded => {
-                std.debug.print("  Status: ✓ PASS - memory limit enforced\n", .{});
+                std.debug.print("  Status: ✓ PASS - memory limit enforced during execution\n", .{});
                 return;
             },
             error.ExecutionTimeout => {

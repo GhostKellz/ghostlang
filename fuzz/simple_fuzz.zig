@@ -5,12 +5,14 @@ const MaxIterations = 10_000;
 const MaxScriptLength = 256;
 const Alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 +-*/%=(){}[]:,.;\n\t\r<>!";
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
-    const random = std.crypto.random;
+    // Seed PRNG from system entropy
+    var seed: u64 = undefined;
+    init.io.random(std.mem.asBytes(&seed));
+    var prng = std.Random.DefaultPrng.init(seed);
+    const random = prng.random();
 
     var iteration: usize = 0;
     while (iteration < MaxIterations) : (iteration += 1) {

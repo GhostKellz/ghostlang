@@ -206,17 +206,17 @@ fn testPluginErrorRecovery(allocator: std.mem.Allocator) !bool {
 
     // Malformed script
     var bad_script = engine.loadScript("var x =") catch {
-        // Error recovered - try a good script
-        var good_script = try engine.loadScript("var y = 42");
+        // Error recovered - try a good script (use expression, not declaration, to get return value)
+        var good_script = try engine.loadScript("40 + 2");
         defer good_script.deinit();
 
         const result = try good_script.run();
 
-        if (result.number == 42) {
+        if (result == .number and result.number == 42) {
             std.debug.print("  ✓ PASS - Engine recovered from error\n\n", .{});
             return true;
         } else {
-            std.debug.print("  ✗ FAIL - Engine corrupted after error\n\n", .{});
+            std.debug.print("  ✗ FAIL - Engine corrupted after error (got {any})\n\n", .{result});
             return false;
         }
     };
