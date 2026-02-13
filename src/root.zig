@@ -4,6 +4,19 @@ const build_options = @import("build_options");
 // By convention, root.zig is the root source file when making a library.
 
 // ============================================================================
+// MODULE REFERENCES (for new code and documentation)
+// ============================================================================
+// These modules contain standalone implementations for reference.
+// Due to tight coupling, core types remain in this file.
+// New code should prefer importing from these modules where possible.
+
+/// Core types module (standalone reference implementation)
+pub const types_ref = @import("types.zig");
+
+/// Bytecode module (standalone reference implementation)
+pub const bytecode_ref = @import("bytecode.zig");
+
+// ============================================================================
 // WEB3 & BLOCKCHAIN INTEGRATION (v0.2.3+)
 // ============================================================================
 
@@ -2026,6 +2039,166 @@ const ProtectedCall = struct {
     arg_count: u16,
 };
 
+/// Editor context for script integration with editors like Grim.
+/// Provides actual buffer state that scripts can read and modify.
+pub const EditorContext = struct {
+    /// Buffer contents as lines
+    lines: std.ArrayListUnmanaged([]const u8),
+    /// Cursor position (line number, 0-indexed)
+    cursor_line: usize,
+    /// Cursor column position (0-indexed)
+    cursor_col: usize,
+    /// Selection start (line, col)
+    selection_start_line: usize,
+    selection_start_col: usize,
+    /// Selection end (line, col)
+    selection_end_line: usize,
+    selection_end_col: usize,
+    /// Whether there's an active selection
+    has_selection: bool,
+    /// File path of the current buffer
+    file_path: ?[]const u8,
+    /// Language/filetype of the buffer
+    language: ?[]const u8,
+    /// Whether the buffer has been modified
+    is_modified: bool,
+    /// Allocator for managing buffer content
+    allocator: std.mem.Allocator,
+
+    /// Initialize a new editor context with empty buffer
+    pub fn init(allocator: std.mem.Allocator) EditorContext {
+        return .{
+            .lines = .{},
+            .cursor_line = 0,
+            .cursor_col = 0,
+            .selection_start_line = 0,
+            .selection_start_col = 0,
+            .selection_end_line = 0,
+            .selection_end_col = 0,
+            .has_selection = false,
+            .file_path = null,
+            .language = null,
+            .is_modified = false,
+            .allocator = allocator,
+        };
+    }
+
+    /// Deinitialize and free all buffer content
+    pub fn deinit(self: *EditorContext) void {
+        for (self.lines.items) |line| {
+            self.allocator.free(line);
+        }
+        self.lines.deinit(self.allocator);
+        if (self.file_path) |path| {
+            self.allocator.free(path);
+        }
+        if (self.language) |lang| {
+            self.allocator.free(lang);
+        }
+    }
+
+    /// Get the number of lines in the buffer
+    pub fn getLineCount(self: *const EditorContext) usize {
+        return self.lines.items.len;
+    }
+
+    /// Get the text of a specific line (1-indexed like Lua)
+    pub fn getLineText(self: *const EditorContext, line_num: usize) ?[]const u8 {
+        if (line_num == 0 or line_num > self.lines.items.len) return null;
+        return self.lines.items[line_num - 1];
+    }
+
+    /// Set the text of a specific line (1-indexed like Lua)
+    pub fn setLineText(self: *EditorContext, line_num: usize, text: []const u8) !void {
+        if (line_num == 0 or line_num > self.lines.items.len) return;
+        const idx = line_num - 1;
+        // Free old line and replace with new
+        self.allocator.free(self.lines.items[idx]);
+        self.lines.items[idx] = try self.allocator.dupe(u8, text);
+        self.is_modified = true;
+    }
+
+    /// Insert a new line at the specified position (1-indexed)
+    pub fn insertLine(self: *EditorContext, line_num: usize, text: []const u8) !void {
+        const idx = if (line_num == 0) 0 else @min(line_num - 1, self.lines.items.len);
+        const new_line = try self.allocator.dupe(u8, text);
+        try self.lines.insert(self.allocator, idx, new_line);
+        self.is_modified = true;
+    }
+
+    /// Delete a line at the specified position (1-indexed)
+    pub fn deleteLine(self: *EditorContext, line_num: usize) void {
+        if (line_num == 0 or line_num > self.lines.items.len) return;
+        const idx = line_num - 1;
+        self.allocator.free(self.lines.items[idx]);
+        _ = self.lines.orderedRemove(idx);
+        self.is_modified = true;
+    }
+
+    /// Set cursor position (1-indexed line)
+    pub fn setCursorPosition(self: *EditorContext, line: usize, col: usize) void {
+        self.cursor_line = if (line > 0) line - 1 else 0;
+        self.cursor_col = col;
+    }
+
+    /// Set selection range (1-indexed lines)
+    pub fn setSelection(self: *EditorContext, start_line: usize, start_col: usize, end_line: usize, end_col: usize) void {
+        self.selection_start_line = if (start_line > 0) start_line - 1 else 0;
+        self.selection_start_col = start_col;
+        self.selection_end_line = if (end_line > 0) end_line - 1 else 0;
+        self.selection_end_col = end_col;
+        self.has_selection = true;
+    }
+
+    /// Clear selection
+    pub fn clearSelection(self: *EditorContext) void {
+        self.has_selection = false;
+    }
+
+    /// Load content from a string (splits by newlines)
+    pub fn loadContent(self: *EditorContext, content: []const u8) !void {
+        // Clear existing content
+        for (self.lines.items) |line| {
+            self.allocator.free(line);
+        }
+        self.lines.clearRetainingCapacity();
+
+        // Split content by newlines
+        var iter = std.mem.splitSequence(u8, content, "\n");
+        while (iter.next()) |line| {
+            const line_copy = try self.allocator.dupe(u8, line);
+            try self.lines.append(self.allocator, line_copy);
+        }
+
+        self.is_modified = false;
+    }
+
+    /// Get all content as a single string (caller owns memory)
+    pub fn getAllContent(self: *const EditorContext, allocator: std.mem.Allocator) ![]u8 {
+        if (self.lines.items.len == 0) return try allocator.alloc(u8, 0);
+
+        // Calculate total size
+        var total_size: usize = 0;
+        for (self.lines.items) |line| {
+            total_size += line.len + 1; // +1 for newline
+        }
+        total_size -= 1; // No trailing newline
+
+        const result = try allocator.alloc(u8, total_size);
+        var offset: usize = 0;
+        for (self.lines.items, 0..) |line, i| {
+            @memcpy(result[offset .. offset + line.len], line);
+            offset += line.len;
+            if (i < self.lines.items.len - 1) {
+                result[offset] = '\n';
+                offset += 1;
+            }
+        }
+
+        return result;
+    }
+};
+
 pub const VM = struct {
     registers: [256]ScriptValue,
     globals: std.StringHashMap(ScriptValue),
@@ -2041,6 +2214,8 @@ pub const VM = struct {
     instruction_count: usize,
     instrumentation: ?Instrumentation,
     last_result_count: u16,
+    /// Editor context for integration with editors (Grim, etc.)
+    editor_context: ?*EditorContext,
 
     pub fn init(allocator: std.mem.Allocator, code: []const Instruction, constants: []ScriptValue, engine: *ScriptEngine) VM {
         var vm = VM{
@@ -2058,6 +2233,7 @@ pub const VM = struct {
             .instruction_count = 0,
             .instrumentation = engine.config.instrumentation,
             .last_result_count = 1,
+            .editor_context = null,
         };
 
         var idx: usize = 0;
@@ -2066,6 +2242,17 @@ pub const VM = struct {
         }
 
         return vm;
+    }
+
+    /// Set the editor context for this VM.
+    /// The context is owned by the caller and must remain valid for the VM's lifetime.
+    pub fn setEditorContext(self: *VM, ctx: *EditorContext) void {
+        self.editor_context = ctx;
+    }
+
+    /// Get the current editor context, if any.
+    pub fn getEditorContext(self: *const VM) ?*EditorContext {
+        return self.editor_context;
     }
 
     pub fn deinit(self: *VM) void {
@@ -4337,7 +4524,7 @@ pub const BuiltinFunctions = struct {
         if (args.len != 1 or args[0] != .array) return .{ .nil = {} };
         const array_ptr = args[0].array;
 
-        // Sort the array in-place using string comparison
+        // Sort the array in-place using O(n log n) block sort
         // Only works for arrays of strings or numbers
         const items = array_ptr.items.items;
         if (items.len <= 1) {
@@ -4345,34 +4532,27 @@ pub const BuiltinFunctions = struct {
             return .{ .array = array_ptr };
         }
 
-        // Simple bubble sort for simplicity (TODO: use std.sort for better performance)
-        var i: usize = 0;
-        while (i < items.len - 1) : (i += 1) {
-            var j: usize = 0;
-            while (j < items.len - i - 1) : (j += 1) {
-                const should_swap = blk: {
-                    // Compare items[j] and items[j+1]
-                    if (items[j] == .string and items[j + 1] == .string) {
-                        // String comparison
-                        const cmp = std.mem.order(u8, items[j].string, items[j + 1].string);
-                        break :blk cmp == .gt;
-                    } else if (items[j] == .number and items[j + 1] == .number) {
-                        // Number comparison
-                        break :blk items[j].number > items[j + 1].number;
-                    } else {
-                        // Mixed types or unsupported - don't swap
-                        break :blk false;
-                    }
-                };
-
-                if (should_swap) {
-                    // Swap items[j] and items[j+1]
-                    const temp = items[j];
-                    items[j] = items[j + 1];
-                    items[j + 1] = temp;
+        // Use std.sort.block for O(n log n) performance
+        std.sort.block(ScriptValue, items, {}, struct {
+            fn lessThan(_: void, a: ScriptValue, b: ScriptValue) bool {
+                // Compare two script values
+                if (a == .string and b == .string) {
+                    // String comparison
+                    return std.mem.order(u8, a.string, b.string) == .lt;
+                } else if (a == .number and b == .number) {
+                    // Number comparison
+                    return a.number < b.number;
+                } else if (a == .number and b == .string) {
+                    // Numbers come before strings
+                    return true;
+                } else if (a == .string and b == .number) {
+                    // Strings come after numbers
+                    return false;
                 }
+                // Other types maintain their relative order
+                return false;
             }
-        }
+        }.lessThan);
 
         array_ptr.retain();
         return .{ .array = array_ptr };
@@ -5370,6 +5550,149 @@ pub const BuiltinFunctions = struct {
             const name_copy = try vm.allocator.dupe(u8, "error");
             try vm.globals.put(name_copy, .{ .native_function = .{ .context = null, .call = builtin_error_native } });
         }
+
+        // Register map and filter functions
+        if (vm.engine.globals.get("map") == null and vm.globals.get("map") == null) {
+            const name_copy = try vm.allocator.dupe(u8, "map");
+            try vm.globals.put(name_copy, .{ .native_function = .{ .context = null, .call = builtin_map_native } });
+        }
+
+        if (vm.engine.globals.get("filter") == null and vm.globals.get("filter") == null) {
+            const name_copy = try vm.allocator.dupe(u8, "filter");
+            try vm.globals.put(name_copy, .{ .native_function = .{ .context = null, .call = builtin_filter_native } });
+        }
+    }
+
+    /// map(array, fn) - Apply function to each element, return new array
+    /// Works with builtin functions. For script functions, use a for loop.
+    fn builtin_map_native(
+        _: ?*anyopaque,
+        vm_ptr: *anyopaque,
+        dest_reg: u16,
+        arg_start: u16,
+        arg_count: u16,
+        _: u16,
+    ) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+
+        if (arg_count < 2) {
+            vm.registers[dest_reg] = .{ .nil = {} };
+            return .{ .last_result_count = 1 };
+        }
+
+        const array_reg = vm.registers[arg_start];
+        const func_reg = vm.registers[arg_start + 1];
+
+        if (array_reg != .array) {
+            vm.registers[dest_reg] = .{ .nil = {} };
+            return .{ .last_result_count = 1 };
+        }
+
+        const source_array = array_reg.array;
+        const result_array = ScriptArray.create(vm.allocator) catch {
+            vm.registers[dest_reg] = .{ .nil = {} };
+            return .{ .last_result_count = 1 };
+        };
+        errdefer result_array.release();
+
+        // Process each element through the function
+        for (source_array.items.items) |item| {
+            const mapped_value: ScriptValue = switch (func_reg) {
+                .function => |func| blk: {
+                    const args = [_]ScriptValue{item};
+                    break :blk func(&args);
+                },
+                else => item, // If not a callable, return original
+            };
+
+            // Copy the result to avoid ownership issues
+            const copied = copyScriptValue(vm.allocator, mapped_value) catch {
+                result_array.release();
+                vm.registers[dest_reg] = .{ .nil = {} };
+                return .{ .last_result_count = 1 };
+            };
+            result_array.items.append(vm.allocator, copied) catch {
+                var tmp = copied;
+                tmp.deinit(vm.allocator);
+                result_array.release();
+                vm.registers[dest_reg] = .{ .nil = {} };
+                return .{ .last_result_count = 1 };
+            };
+        }
+
+        vm.registers[dest_reg] = .{ .array = result_array };
+        return .{ .last_result_count = 1 };
+    }
+
+    /// filter(array, fn) - Return elements where function returns truthy
+    /// Works with builtin functions. For script functions, use a for loop.
+    fn builtin_filter_native(
+        _: ?*anyopaque,
+        vm_ptr: *anyopaque,
+        dest_reg: u16,
+        arg_start: u16,
+        arg_count: u16,
+        _: u16,
+    ) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+
+        if (arg_count < 2) {
+            vm.registers[dest_reg] = .{ .nil = {} };
+            return .{ .last_result_count = 1 };
+        }
+
+        const array_reg = vm.registers[arg_start];
+        const func_reg = vm.registers[arg_start + 1];
+
+        if (array_reg != .array) {
+            vm.registers[dest_reg] = .{ .nil = {} };
+            return .{ .last_result_count = 1 };
+        }
+
+        const source_array = array_reg.array;
+        const result_array = ScriptArray.create(vm.allocator) catch {
+            vm.registers[dest_reg] = .{ .nil = {} };
+            return .{ .last_result_count = 1 };
+        };
+        errdefer result_array.release();
+
+        // Process each element through the predicate function
+        for (source_array.items.items) |item| {
+            const keep: bool = switch (func_reg) {
+                .function => |func| blk: {
+                    const args = [_]ScriptValue{item};
+                    const result = func(&args);
+                    // Check if result is truthy
+                    break :blk switch (result) {
+                        .nil => false,
+                        .boolean => |b| b,
+                        .number => |n| n != 0,
+                        .string => |s| s.len > 0,
+                        else => true,
+                    };
+                },
+                else => true, // If not a callable, keep all elements
+            };
+
+            if (keep) {
+                // Copy the item to avoid ownership issues
+                const copied = copyScriptValue(vm.allocator, item) catch {
+                    result_array.release();
+                    vm.registers[dest_reg] = .{ .nil = {} };
+                    return .{ .last_result_count = 1 };
+                };
+                result_array.items.append(vm.allocator, copied) catch {
+                    var tmp = copied;
+                    tmp.deinit(vm.allocator);
+                    result_array.release();
+                    vm.registers[dest_reg] = .{ .nil = {} };
+                    return .{ .last_result_count = 1 };
+                };
+            }
+        }
+
+        vm.registers[dest_reg] = .{ .array = result_array };
+        return .{ .last_result_count = 1 };
     }
 };
 
@@ -5377,138 +5700,325 @@ pub const BuiltinFunctions = struct {
 // Editor API
 // ============================================================================
 
-/// EditorAPI provides buffer manipulation functions for plugin development
-/// This is a mock implementation - real implementation will integrate with Grim
+/// EditorAPI provides buffer manipulation functions for plugin development.
+/// These functions read from and write to the EditorContext attached to the VM.
+/// When no editor context is attached, functions return sensible defaults.
 pub const EditorAPI = struct {
-    lines: std.ArrayList([]const u8),
-    cursor_line: usize,
-    cursor_col: usize,
-    selection_start: usize,
-    selection_end: usize,
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator) !EditorAPI {
-        var api = EditorAPI{
-            .lines = std.array_list.Managed([]const u8).init(allocator),
-            .cursor_line = 0,
-            .cursor_col = 0,
-            .selection_start = 0,
-            .selection_end = 0,
-            .allocator = allocator,
+    /// Register all editor API functions as native functions on the VM.
+    /// These functions access the editor context through vm.editor_context.
+    pub fn registerEditorAPI(vm: *VM) !void {
+        const builtins = [_]struct { name: []const u8, func: *const fn (?*anyopaque, *anyopaque, u16, u16, u16, u16) ExecutionError!NativeCallResult }{
+            // Buffer operations
+            .{ .name = "getLineCount", .func = &native_getLineCount },
+            .{ .name = "getLineText", .func = &native_getLineText },
+            .{ .name = "setLineText", .func = &native_setLineText },
+            .{ .name = "insertLine", .func = &native_insertLine },
+            .{ .name = "deleteLine", .func = &native_deleteLine },
+            .{ .name = "getAllText", .func = &native_getAllText },
+            // Cursor operations
+            .{ .name = "getCursorLine", .func = &native_getCursorLine },
+            .{ .name = "getCursorCol", .func = &native_getCursorCol },
+            .{ .name = "setCursorPosition", .func = &native_setCursorPosition },
+            // Selection operations
+            .{ .name = "getSelectionStart", .func = &native_getSelectionStart },
+            .{ .name = "getSelectionEnd", .func = &native_getSelectionEnd },
+            .{ .name = "setSelection", .func = &native_setSelection },
+            .{ .name = "hasSelection", .func = &native_hasSelection },
+            .{ .name = "clearSelection", .func = &native_clearSelection },
+            // File info
+            .{ .name = "getFilePath", .func = &native_getFilePath },
+            .{ .name = "getFileLanguage", .func = &native_getFileLanguage },
+            .{ .name = "isModified", .func = &native_isModified },
         };
 
-        // Initialize with some sample content
-        try api.lines.append(try allocator.dupe(u8, "Line 1"));
-        try api.lines.append(try allocator.dupe(u8, "Line 2"));
-        try api.lines.append(try allocator.dupe(u8, "Line 3"));
-
-        return api;
+        for (builtins) |builtin| {
+            const key = try vm.allocator.dupe(u8, builtin.name);
+            errdefer vm.allocator.free(key);
+            try vm.globals.put(key, .{ .native_function = .{ .context = null, .call = builtin.func } });
+        }
     }
 
-    pub fn deinit(self: *EditorAPI) void {
-        for (self.lines.items) |line| {
-            self.allocator.free(line);
-        }
-        self.lines.deinit();
+    // Helper to get editor context from VM
+    fn getContext(vm_ptr: *anyopaque) ?*EditorContext {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        return vm.editor_context;
     }
 
     // Buffer operations
-    pub fn builtin_getLineCount(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // TODO: Get from actual editor context
-        return .{ .number = 100 };
+
+    fn native_getLineCount(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, _: u16, _: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        const count: f64 = if (getContext(vm_ptr)) |ctx|
+            @floatFromInt(ctx.getLineCount())
+        else
+            0;
+        vm.registers[dest_reg] = .{ .number = count };
+        return .{ .last_result_count = 1 };
     }
 
-    pub fn builtin_getLineText(args: []const ScriptValue) ScriptValue {
-        if (args.len != 1) return .{ .nil = {} };
-        if (args[0] != .number) return .{ .nil = {} };
-
-        // TODO: Get from actual editor context
-        const line_num = @as(usize, @intFromFloat(args[0].number));
-        _ = line_num;
-        return makeHelperStringLiteral("sample line text");
+    fn native_getLineText(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, arg_start: u16, arg_count: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        if (arg_count < 1 or vm.registers[arg_start] != .number) {
+            vm.registers[dest_reg] = .{ .nil = {} };
+            return .{ .last_result_count = 1 };
+        }
+        const line_num = @as(usize, @intFromFloat(vm.registers[arg_start].number));
+        if (getContext(vm_ptr)) |ctx| {
+            if (ctx.getLineText(line_num)) |text| {
+                vm.registers[dest_reg] = .{ .string = vm.allocator.dupe(u8, text) catch {
+                    vm.registers[dest_reg] = .{ .nil = {} };
+                    return .{ .last_result_count = 1 };
+                } };
+                return .{ .last_result_count = 1 };
+            }
+        }
+        vm.registers[dest_reg] = .{ .nil = {} };
+        return .{ .last_result_count = 1 };
     }
 
-    pub fn builtin_setLineText(args: []const ScriptValue) ScriptValue {
-        if (args.len != 2) return .{ .nil = {} };
-        if (args[0] != .number) return .{ .nil = {} };
-        if (args[1] != .string) return .{ .nil = {} };
+    fn native_setLineText(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, arg_start: u16, arg_count: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        if (arg_count < 2 or vm.registers[arg_start] != .number or vm.registers[arg_start + 1] != .string) {
+            vm.registers[dest_reg] = .{ .boolean = false };
+            return .{ .last_result_count = 1 };
+        }
+        const line_num = @as(usize, @intFromFloat(vm.registers[arg_start].number));
+        const text = vm.registers[arg_start + 1].string;
+        if (getContext(vm_ptr)) |ctx| {
+            ctx.setLineText(line_num, text) catch {
+                vm.registers[dest_reg] = .{ .boolean = false };
+                return .{ .last_result_count = 1 };
+            };
+            vm.registers[dest_reg] = .{ .boolean = true };
+            return .{ .last_result_count = 1 };
+        }
+        vm.registers[dest_reg] = .{ .boolean = false };
+        return .{ .last_result_count = 1 };
+    }
 
-        // TODO: Set in actual editor context
-        const line_num = @as(usize, @intFromFloat(args[0].number));
-        const text = args[1].string;
-        _ = line_num;
-        _ = text;
-        return .{ .nil = {} };
+    fn native_insertLine(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, arg_start: u16, arg_count: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        if (arg_count < 2 or vm.registers[arg_start] != .number or vm.registers[arg_start + 1] != .string) {
+            vm.registers[dest_reg] = .{ .boolean = false };
+            return .{ .last_result_count = 1 };
+        }
+        const line_num = @as(usize, @intFromFloat(vm.registers[arg_start].number));
+        const text = vm.registers[arg_start + 1].string;
+        if (getContext(vm_ptr)) |ctx| {
+            ctx.insertLine(line_num, text) catch {
+                vm.registers[dest_reg] = .{ .boolean = false };
+                return .{ .last_result_count = 1 };
+            };
+            vm.registers[dest_reg] = .{ .boolean = true };
+            return .{ .last_result_count = 1 };
+        }
+        vm.registers[dest_reg] = .{ .boolean = false };
+        return .{ .last_result_count = 1 };
+    }
+
+    fn native_deleteLine(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, arg_start: u16, arg_count: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        if (arg_count < 1 or vm.registers[arg_start] != .number) {
+            vm.registers[dest_reg] = .{ .boolean = false };
+            return .{ .last_result_count = 1 };
+        }
+        const line_num = @as(usize, @intFromFloat(vm.registers[arg_start].number));
+        if (getContext(vm_ptr)) |ctx| {
+            ctx.deleteLine(line_num);
+            vm.registers[dest_reg] = .{ .boolean = true };
+            return .{ .last_result_count = 1 };
+        }
+        vm.registers[dest_reg] = .{ .boolean = false };
+        return .{ .last_result_count = 1 };
+    }
+
+    fn native_getAllText(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, _: u16, _: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        if (getContext(vm_ptr)) |ctx| {
+            const content = ctx.getAllContent(vm.allocator) catch {
+                vm.registers[dest_reg] = .{ .nil = {} };
+                return .{ .last_result_count = 1 };
+            };
+            vm.registers[dest_reg] = .{ .string = content };
+            return .{ .last_result_count = 1 };
+        }
+        vm.registers[dest_reg] = .{ .string = "" };
+        return .{ .last_result_count = 1 };
     }
 
     // Cursor operations
-    pub fn builtin_getCursorLine(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // TODO: Get from actual editor context
-        return .{ .number = 0 };
+
+    fn native_getCursorLine(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, _: u16, _: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        const line: f64 = if (getContext(vm_ptr)) |ctx|
+            @floatFromInt(ctx.cursor_line + 1) // 1-indexed for scripts
+        else
+            1;
+        vm.registers[dest_reg] = .{ .number = line };
+        return .{ .last_result_count = 1 };
     }
 
-    pub fn builtin_getCursorCol(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // TODO: Get from actual editor context
-        return .{ .number = 0 };
+    fn native_getCursorCol(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, _: u16, _: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        const col: f64 = if (getContext(vm_ptr)) |ctx|
+            @floatFromInt(ctx.cursor_col)
+        else
+            0;
+        vm.registers[dest_reg] = .{ .number = col };
+        return .{ .last_result_count = 1 };
     }
 
-    pub fn builtin_setCursorPosition(args: []const ScriptValue) ScriptValue {
-        if (args.len != 2) return .{ .nil = {} };
-        if (args[0] != .number) return .{ .nil = {} };
-        if (args[1] != .number) return .{ .nil = {} };
-
-        // TODO: Set in actual editor context
-        const line = @as(usize, @intFromFloat(args[0].number));
-        const col = @as(usize, @intFromFloat(args[1].number));
-        _ = line;
-        _ = col;
-        return .{ .nil = {} };
+    fn native_setCursorPosition(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, arg_start: u16, arg_count: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        if (arg_count < 2 or vm.registers[arg_start] != .number or vm.registers[arg_start + 1] != .number) {
+            vm.registers[dest_reg] = .{ .boolean = false };
+            return .{ .last_result_count = 1 };
+        }
+        const line = @as(usize, @intFromFloat(vm.registers[arg_start].number));
+        const col = @as(usize, @intFromFloat(vm.registers[arg_start + 1].number));
+        if (getContext(vm_ptr)) |ctx| {
+            ctx.setCursorPosition(line, col);
+            vm.registers[dest_reg] = .{ .boolean = true };
+            return .{ .last_result_count = 1 };
+        }
+        vm.registers[dest_reg] = .{ .boolean = false };
+        return .{ .last_result_count = 1 };
     }
 
     // Selection operations
-    pub fn builtin_getSelectionStart(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // TODO: Get from actual editor context
-        return .{ .number = 0 };
+
+    fn native_getSelectionStart(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, _: u16, _: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        if (getContext(vm_ptr)) |ctx| {
+            // Return as table with line and col
+            const table = ScriptTable.create(vm.allocator) catch {
+                vm.registers[dest_reg] = .{ .nil = {} };
+                return .{ .last_result_count = 1 };
+            };
+            const line_key = vm.allocator.dupe(u8, "line") catch {
+                table.release();
+                vm.registers[dest_reg] = .{ .nil = {} };
+                return .{ .last_result_count = 1 };
+            };
+            const col_key = vm.allocator.dupe(u8, "col") catch {
+                vm.allocator.free(line_key);
+                table.release();
+                vm.registers[dest_reg] = .{ .nil = {} };
+                return .{ .last_result_count = 1 };
+            };
+            table.map.put(line_key, .{ .number = @floatFromInt(ctx.selection_start_line + 1) }) catch {};
+            table.map.put(col_key, .{ .number = @floatFromInt(ctx.selection_start_col) }) catch {};
+            vm.registers[dest_reg] = .{ .table = table };
+            return .{ .last_result_count = 1 };
+        }
+        vm.registers[dest_reg] = .{ .nil = {} };
+        return .{ .last_result_count = 1 };
     }
 
-    pub fn builtin_getSelectionEnd(args: []const ScriptValue) ScriptValue {
-        _ = args;
-        // TODO: Get from actual editor context
-        return .{ .number = 0 };
+    fn native_getSelectionEnd(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, _: u16, _: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        if (getContext(vm_ptr)) |ctx| {
+            const table = ScriptTable.create(vm.allocator) catch {
+                vm.registers[dest_reg] = .{ .nil = {} };
+                return .{ .last_result_count = 1 };
+            };
+            const line_key = vm.allocator.dupe(u8, "line") catch {
+                table.release();
+                vm.registers[dest_reg] = .{ .nil = {} };
+                return .{ .last_result_count = 1 };
+            };
+            const col_key = vm.allocator.dupe(u8, "col") catch {
+                vm.allocator.free(line_key);
+                table.release();
+                vm.registers[dest_reg] = .{ .nil = {} };
+                return .{ .last_result_count = 1 };
+            };
+            table.map.put(line_key, .{ .number = @floatFromInt(ctx.selection_end_line + 1) }) catch {};
+            table.map.put(col_key, .{ .number = @floatFromInt(ctx.selection_end_col) }) catch {};
+            vm.registers[dest_reg] = .{ .table = table };
+            return .{ .last_result_count = 1 };
+        }
+        vm.registers[dest_reg] = .{ .nil = {} };
+        return .{ .last_result_count = 1 };
     }
 
-    pub fn builtin_setSelection(args: []const ScriptValue) ScriptValue {
-        if (args.len != 4) return .{ .nil = {} };
-
-        // TODO: Set in actual editor context
-        return .{ .nil = {} };
+    fn native_setSelection(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, arg_start: u16, arg_count: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        if (arg_count < 4) {
+            vm.registers[dest_reg] = .{ .boolean = false };
+            return .{ .last_result_count = 1 };
+        }
+        const regs = vm.registers[arg_start .. arg_start + 4];
+        if (regs[0] != .number or regs[1] != .number or regs[2] != .number or regs[3] != .number) {
+            vm.registers[dest_reg] = .{ .boolean = false };
+            return .{ .last_result_count = 1 };
+        }
+        const start_line = @as(usize, @intFromFloat(regs[0].number));
+        const start_col = @as(usize, @intFromFloat(regs[1].number));
+        const end_line = @as(usize, @intFromFloat(regs[2].number));
+        const end_col = @as(usize, @intFromFloat(regs[3].number));
+        if (getContext(vm_ptr)) |ctx| {
+            ctx.setSelection(start_line, start_col, end_line, end_col);
+            vm.registers[dest_reg] = .{ .boolean = true };
+            return .{ .last_result_count = 1 };
+        }
+        vm.registers[dest_reg] = .{ .boolean = false };
+        return .{ .last_result_count = 1 };
     }
 
-    fn putGlobalFn(vm: *VM, name: []const u8, func: *const fn ([]const ScriptValue) ScriptValue) !void {
-        const key = try vm.allocator.dupe(u8, name);
-        errdefer vm.allocator.free(key);
-        try vm.globals.put(key, .{ .function = func });
+    fn native_hasSelection(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, _: u16, _: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        const has: bool = if (getContext(vm_ptr)) |ctx| ctx.has_selection else false;
+        vm.registers[dest_reg] = .{ .boolean = has };
+        return .{ .last_result_count = 1 };
     }
 
-    pub fn registerEditorAPI(vm: *VM) !void {
-        // Buffer operations
-        try putGlobalFn(vm, "getLineCount", &builtin_getLineCount);
-        try putGlobalFn(vm, "getLineText", &builtin_getLineText);
-        try putGlobalFn(vm, "setLineText", &builtin_setLineText);
+    fn native_clearSelection(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, _: u16, _: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        if (getContext(vm_ptr)) |ctx| {
+            ctx.clearSelection();
+        }
+        vm.registers[dest_reg] = .{ .nil = {} };
+        return .{ .last_result_count = 1 };
+    }
 
-        // Cursor operations
-        try putGlobalFn(vm, "getCursorLine", &builtin_getCursorLine);
-        try putGlobalFn(vm, "getCursorCol", &builtin_getCursorCol);
-        try putGlobalFn(vm, "setCursorPosition", &builtin_setCursorPosition);
+    // File info operations
 
-        // Selection operations
-        try putGlobalFn(vm, "getSelectionStart", &builtin_getSelectionStart);
-        try putGlobalFn(vm, "getSelectionEnd", &builtin_getSelectionEnd);
-        try putGlobalFn(vm, "setSelection", &builtin_setSelection);
+    fn native_getFilePath(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, _: u16, _: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        if (getContext(vm_ptr)) |ctx| {
+            if (ctx.file_path) |path| {
+                vm.registers[dest_reg] = .{ .string = vm.allocator.dupe(u8, path) catch {
+                    vm.registers[dest_reg] = .{ .nil = {} };
+                    return .{ .last_result_count = 1 };
+                } };
+                return .{ .last_result_count = 1 };
+            }
+        }
+        vm.registers[dest_reg] = .{ .nil = {} };
+        return .{ .last_result_count = 1 };
+    }
+
+    fn native_getFileLanguage(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, _: u16, _: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        if (getContext(vm_ptr)) |ctx| {
+            if (ctx.language) |lang| {
+                vm.registers[dest_reg] = .{ .string = vm.allocator.dupe(u8, lang) catch {
+                    vm.registers[dest_reg] = .{ .nil = {} };
+                    return .{ .last_result_count = 1 };
+                } };
+                return .{ .last_result_count = 1 };
+            }
+        }
+        vm.registers[dest_reg] = .{ .nil = {} };
+        return .{ .last_result_count = 1 };
+    }
+
+    fn native_isModified(_: ?*anyopaque, vm_ptr: *anyopaque, dest_reg: u16, _: u16, _: u16, _: u16) ExecutionError!NativeCallResult {
+        const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+        const modified: bool = if (getContext(vm_ptr)) |ctx| ctx.is_modified else false;
+        vm.registers[dest_reg] = .{ .boolean = modified };
+        return .{ .last_result_count = 1 };
     }
 };
 

@@ -417,9 +417,76 @@ pub const TransactionExecutor = struct {
 
         std.log.info("Deployed contract at {x}", .{std.fmt.fmtSliceHexLower(&address)});
 
-        // TODO: Execute constructor (init function)
+        // Execute constructor if present
+        try self.executeConstructor(address, tx.from, tx.value, tx.gas_limit);
 
         return address;
+    }
+
+    /// Execute contract constructor (init/constructor function)
+    fn executeConstructor(
+        self: *TransactionExecutor,
+        contract: web3.Address,
+        deployer: web3.Address,
+        value: u64,
+        gas_limit: u64,
+    ) !void {
+        // Get contract code
+        const code = self.state.getCode(contract) orelse return;
+
+        // Check for constructor signature in bytecode
+        // In GhostLang, constructors are functions named "constructor" or "init"
+        const has_constructor = findConstructor(code);
+
+        if (!has_constructor) {
+            std.log.debug("No constructor found in contract", .{});
+            return;
+        }
+
+        // Create execution context for constructor
+        var storage_impl = WorldStateStorage{ .state = self.state };
+        var event_logger_impl = WorldStateEventLogger{
+            .state = self.state,
+            .contract_address = contract,
+            .block_number = self.block_number,
+            .tx_hash = [_]u8{0} ** 32, // No tx hash for constructor
+        };
+        var balance_query_impl = WorldStateBalanceQuery{ .state = self.state };
+
+        var ctx = web3.Context{
+            .allocator = self.allocator,
+            .caller = deployer,
+            .this = contract,
+            .origin = deployer,
+            .value = value,
+            .gas_available = gas_limit,
+            .block_number = self.block_number,
+            .block_timestamp = self.block_timestamp,
+            .block_coinbase = self.block_coinbase,
+            .chain_id = self.chain_id,
+            .storage = @ptrCast(@alignCast(&storage_impl)),
+            .event_logger = @ptrCast(@alignCast(&event_logger_impl)),
+            .balance_query = @ptrCast(@alignCast(&balance_query_impl)),
+        };
+
+        // Execute constructor
+        // The constructor receives no calldata (or constructor args in data)
+        _ = try self.executeContractCode(contract, &[_]u8{}, &ctx);
+
+        std.log.info("Constructor executed for contract {x}", .{std.fmt.fmtSliceHexLower(&contract)});
+    }
+
+    /// Check if bytecode contains a constructor function
+    fn findConstructor(code: []const u8) bool {
+        // Search for "constructor" or "init" function signature in bytecode
+        // This is a simplified check - in production, parse the bytecode properly
+        const constructor_sig = "constructor";
+        const init_sig = "function init";
+
+        if (std.mem.indexOf(u8, code, constructor_sig) != null) return true;
+        if (std.mem.indexOf(u8, code, init_sig) != null) return true;
+
+        return false;
     }
 
     /// Call a contract

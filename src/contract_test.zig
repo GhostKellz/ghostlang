@@ -183,20 +183,40 @@ pub const TestEnvironment = struct {
         };
     }
 
-    /// Static call (doesn't modify state)
+    /// Static call (doesn't modify state) - for view/pure functions
+    /// Creates a temporary state snapshot, executes, then discards changes
     pub fn staticCall(
         self: *TestEnvironment,
         caller: web3.Address,
         contract: web3.Address,
         calldata: []const u8,
-    ) ![]const u8 {
-        // TODO: Implement view/pure function calls
-        _ = self;
-        _ = caller;
-        _ = contract;
-        _ = calldata;
-        return &[_]u8{};
+    ) !StaticCallResult {
+        // Take a snapshot before execution
+        const snap = try self.snapshot();
+        const initial_event_count = self.events.items.len;
+
+        // Execute the call
+        const result = try self.call(caller, contract, calldata, 0, 1_000_000);
+
+        // Revert all state changes
+        try self.revertFull(snap);
+
+        // Remove any events emitted during this call
+        while (self.events.items.len > initial_event_count) {
+            var event = self.events.pop();
+            event.deinit(self.allocator);
+        }
+
+        return StaticCallResult{
+            .success = result.success,
+            .gas_used = result.gas_used,
+        };
     }
+
+    const StaticCallResult = struct {
+        success: bool,
+        gas_used: u64,
+    };
 
     /// Mine a block (advance time and block number)
     pub fn mineBlock(self: *TestEnvironment) void {
@@ -242,27 +262,119 @@ pub const TestEnvironment = struct {
         self.events.clearRetainingCapacity();
     }
 
-    /// Snapshot state (for reverting)
+    /// Full state revert including all contract storage and balances
+    pub fn revertFull(self: *TestEnvironment, snap: Snapshot) !void {
+        self.block_number = snap.block_number;
+        self.block_timestamp = snap.block_timestamp;
+
+        // Restore state from snapshot
+        if (snap.state_snapshot) |state_snap| {
+            // Clear current state
+            self.state.balances.clearRetainingCapacity();
+            self.state.nonces.clearRetainingCapacity();
+
+            // Clear storage maps
+            var storage_it = self.state.storage.valueIterator();
+            while (storage_it.next()) |map| {
+                map.deinit();
+            }
+            self.state.storage.clearRetainingCapacity();
+
+            // Restore balances
+            var bal_it = state_snap.balances.iterator();
+            while (bal_it.next()) |entry| {
+                try self.state.balances.put(entry.key_ptr.*, entry.value_ptr.*);
+            }
+
+            // Restore nonces
+            var nonce_it = state_snap.nonces.iterator();
+            while (nonce_it.next()) |entry| {
+                try self.state.nonces.put(entry.key_ptr.*, entry.value_ptr.*);
+            }
+
+            // Restore storage
+            var snap_storage_it = state_snap.storage.iterator();
+            while (snap_storage_it.next()) |entry| {
+                const new_map = std.AutoHashMap(web3.Hash, web3.Hash).init(self.allocator);
+                try self.state.storage.put(entry.key_ptr.*, new_map);
+
+                var inner_it = entry.value_ptr.iterator();
+                while (inner_it.next()) |inner_entry| {
+                    try self.state.storage.getPtr(entry.key_ptr.*).?.put(inner_entry.key_ptr.*, inner_entry.value_ptr.*);
+                }
+            }
+        }
+
+        // Clear events emitted after snapshot
+        while (self.events.items.len > snap.event_count) {
+            var event = self.events.pop();
+            event.deinit(self.allocator);
+        }
+    }
+
+    /// Snapshot state (for reverting) - now includes full state copy
     pub fn snapshot(self: *TestEnvironment) !Snapshot {
+        // Clone current state
+        var state_snap = StateSnapshot{
+            .balances = std.AutoHashMap(web3.Address, u64).init(self.allocator),
+            .nonces = std.AutoHashMap(web3.Address, u64).init(self.allocator),
+            .storage = std.AutoHashMap(web3.Address, std.AutoHashMap(web3.Hash, web3.Hash)).init(self.allocator),
+        };
+
+        // Copy balances
+        var bal_it = self.state.balances.iterator();
+        while (bal_it.next()) |entry| {
+            try state_snap.balances.put(entry.key_ptr.*, entry.value_ptr.*);
+        }
+
+        // Copy nonces
+        var nonce_it = self.state.nonces.iterator();
+        while (nonce_it.next()) |entry| {
+            try state_snap.nonces.put(entry.key_ptr.*, entry.value_ptr.*);
+        }
+
+        // Copy storage (deep copy)
+        var storage_it = self.state.storage.iterator();
+        while (storage_it.next()) |entry| {
+            var inner_copy = std.AutoHashMap(web3.Hash, web3.Hash).init(self.allocator);
+            var inner_it = entry.value_ptr.iterator();
+            while (inner_it.next()) |inner_entry| {
+                try inner_copy.put(inner_entry.key_ptr.*, inner_entry.value_ptr.*);
+            }
+            try state_snap.storage.put(entry.key_ptr.*, inner_copy);
+        }
+
         return Snapshot{
             .block_number = self.block_number,
             .block_timestamp = self.block_timestamp,
             .state_root = try self.state.calculateStateRoot(),
+            .state_snapshot = state_snap,
+            .event_count = self.events.items.len,
         };
     }
 
-    /// Revert to snapshot
-    pub fn revert(self: *TestEnvironment, snap: Snapshot) void {
-        self.block_number = snap.block_number;
-        self.block_timestamp = snap.block_timestamp;
-        // TODO: Implement full state revert
-        _ = snap.state_root;
-    }
+    const StateSnapshot = struct {
+        balances: std.AutoHashMap(web3.Address, u64),
+        nonces: std.AutoHashMap(web3.Address, u64),
+        storage: std.AutoHashMap(web3.Address, std.AutoHashMap(web3.Hash, web3.Hash)),
+
+        pub fn deinit(self: *StateSnapshot) void {
+            self.balances.deinit();
+            self.nonces.deinit();
+            var it = self.storage.valueIterator();
+            while (it.next()) |map| {
+                map.deinit();
+            }
+            self.storage.deinit();
+        }
+    };
 
     const Snapshot = struct {
         block_number: u64,
         block_timestamp: u64,
         state_root: [32]u8,
+        state_snapshot: ?StateSnapshot,
+        event_count: usize,
     };
 };
 

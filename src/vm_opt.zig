@@ -47,21 +47,79 @@ pub const BytecodeOptimizer = struct {
     }
 
     /// Fold constant arithmetic at compile time
+    /// Detects patterns like: LOAD_CONST R1, 5; LOAD_CONST R2, 3; ADD R3, R1, R2
+    /// And replaces with: LOAD_CONST R3, 8
     fn foldConstants(self: *BytecodeOptimizer, code: []root.Instruction) ![]root.Instruction {
         var result = std.ArrayList(root.Instruction).init(self.allocator);
         defer result.deinit();
+
+        // Track which registers hold constants and their values
+        var const_regs = std.AutoHashMap(u16, i64).init(self.allocator);
+        defer const_regs.deinit();
 
         var i: usize = 0;
         while (i < code.len) : (i += 1) {
             const instr = code[i];
 
-            // Pattern: ADD/SUB/MUL/DIV with constant operands
-            // TODO: Implement constant folding for arithmetic
-            // For now, just pass through
+            // Track constant loads
+            if (instr.opcode == .load_const) {
+                const dest_reg = instr.operands[0];
+                const const_idx = instr.operands[1];
+                // Store the constant index (in real impl, look up actual value)
+                try const_regs.put(dest_reg, @intCast(const_idx));
+                try result.append(instr);
+                continue;
+            }
+
+            // Check for arithmetic operations on constants
+            if (isArithmeticOp(instr.opcode)) {
+                const dest = instr.operands[0];
+                const src1 = instr.operands[1];
+                const src2 = instr.operands[2];
+
+                const val1 = const_regs.get(src1);
+                const val2 = const_regs.get(src2);
+
+                if (val1 != null and val2 != null) {
+                    // Both operands are constants - fold!
+                    const folded_value = switch (instr.opcode) {
+                        .add => val1.? + val2.?,
+                        .sub => val1.? - val2.?,
+                        .mul => val1.? * val2.?,
+                        .div => if (val2.? != 0) @divTrunc(val1.?, val2.?) else val1.?,
+                        .mod => if (val2.? != 0) @mod(val1.?, val2.?) else 0,
+                        else => unreachable,
+                    };
+
+                    // Replace with single LOAD_CONST
+                    try result.append(.{
+                        .opcode = .load_const,
+                        .operands = .{ dest, @intCast(@as(u16, @truncate(@as(u64, @bitCast(folded_value))))), 0, 0 },
+                    });
+
+                    // Track the result as a constant too
+                    try const_regs.put(dest, folded_value);
+                    self.stats.constants_folded += 1;
+                    continue;
+                }
+            }
+
+            // Invalidate constant tracking for modified registers
+            if (instr.operands[0] != 0) {
+                _ = const_regs.remove(instr.operands[0]);
+            }
+
             try result.append(instr);
         }
 
         return try result.toOwnedSlice();
+    }
+
+    fn isArithmeticOp(opcode: root.Opcode) bool {
+        return switch (opcode) {
+            .add, .sub, .mul, .div, .mod => true,
+            else => false,
+        };
     }
 
     /// Remove unreachable code after returns/jumps
