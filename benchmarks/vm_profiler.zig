@@ -298,11 +298,14 @@ pub fn profileScript(allocator: std.mem.Allocator, source: []const u8) !void {
     defer script.deinit();
 
     // Run with detailed timing
-    var timer = try std.time.Timer.start();
-    const start = timer.read();
+    var ts_start: std.posix.timespec = undefined;
+    _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_start);
+    const start = @as(u64, @intCast(ts_start.sec)) * 1_000_000_000 + @as(u64, @intCast(ts_start.nsec));
 
     const run_result = script.run();
-    const end = timer.read();
+    var ts_end: std.posix.timespec = undefined;
+    _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_end);
+    const end = @as(u64, @intCast(ts_end.sec)) * 1_000_000_000 + @as(u64, @intCast(ts_end.nsec));
     const total_time = end - start;
 
     var failing_opcode: ?ghostlang.Opcode = null;

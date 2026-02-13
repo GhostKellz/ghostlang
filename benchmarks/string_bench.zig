@@ -34,8 +34,9 @@ fn benchmarkScript(
     // Register string functions (stringMatch, stringGsub, etc.)
     try engine.registerEditorHelpers();
 
-    var timer = try std.time.Timer.start();
-    const start = timer.read();
+    var ts_start: std.posix.timespec = undefined;
+    _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_start);
+    const start = @as(u64, @intCast(ts_start.sec)) * 1_000_000_000 + @as(u64, @intCast(ts_start.nsec));
 
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
@@ -44,7 +45,9 @@ fn benchmarkScript(
         _ = try script.run();
     }
 
-    const end = timer.read();
+    var ts_end: std.posix.timespec = undefined;
+    _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_end);
+    const end = @as(u64, @intCast(ts_end.sec)) * 1_000_000_000 + @as(u64, @intCast(ts_end.nsec));
     const total_ns = end - start;
     const avg_ns = total_ns / iterations;
     const ops_per_sec = @as(f64, @floatFromInt(iterations)) / (@as(f64, @floatFromInt(total_ns)) / 1_000_000_000.0);

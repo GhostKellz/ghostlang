@@ -2136,7 +2136,8 @@ pub const VM = struct {
         active_vm = self;
         defer active_vm = previous_vm;
 
-        const ts_start = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+        var ts_start: std.posix.timespec = undefined;
+        _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_start);
         self.start_time = @as(i64, @intCast(ts_start.sec * 1000 + @divTrunc(ts_start.nsec, 1_000_000)));
         self.instruction_count = 0;
 
@@ -2144,7 +2145,8 @@ pub const VM = struct {
             // Check timeout every 100 instructions to avoid performance overhead
             if (self.instruction_count % 100 == 0) {
                 if (self.engine.config.execution_timeout_ms > 0) {
-                    const ts_now = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+                    var ts_now: std.posix.timespec = undefined;
+                    _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_now);
                     const now_ms = @as(i64, @intCast(ts_now.sec * 1000 + @divTrunc(ts_now.nsec, 1_000_000)));
                     const elapsed = now_ms - self.start_time;
                     if (elapsed > self.engine.config.execution_timeout_ms) {
@@ -4430,7 +4432,8 @@ pub const BuiltinFunctions = struct {
                 }
             }
             // Fallback to timestamp-based seed
-            const ts = std.posix.clock_gettime(.REALTIME) catch unreachable;
+            var ts: std.posix.timespec = undefined;
+            _ = std.posix.system.clock_gettime(.REALTIME, &ts);
             seed = @as(u64, @intCast(ts.sec)) ^ @as(u64, @intCast(ts.nsec));
             break :blk seed;
         });
@@ -7803,7 +7806,8 @@ fn groveParseGhostlang(integration: *GroveIntegration, source: []const u8, diagn
         return ExecutionError.ParseError;
     }
 
-    const ts_start = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+    var ts_start: std.posix.timespec = undefined;
+    _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_start);
     const start_ns = @as(i64, @intCast(ts_start.sec * 1_000_000_000 + ts_start.nsec));
     var parser = Parser.init(integration.allocator, source);
     const parsed = parser.parse() catch |err| {
@@ -7815,7 +7819,8 @@ fn groveParseGhostlang(integration: *GroveIntegration, source: []const u8, diagn
         return ExecutionError.ParseError;
     };
 
-    const ts_end = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+    var ts_end: std.posix.timespec = undefined;
+    _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_end);
     const end_ns = @as(i64, @intCast(ts_end.sec * 1_000_000_000 + ts_end.nsec));
     const elapsed_raw = end_ns - start_ns;
     const elapsed_ns: u64 = if (elapsed_raw < 0) 0 else @as(u64, @intCast(elapsed_raw));

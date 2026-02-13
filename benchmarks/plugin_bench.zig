@@ -30,10 +30,15 @@ fn benchmarkPluginLoading(allocator: std.mem.Allocator) !void {
 
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
-        var timer = try std.time.Timer.start();
+        var ts_start: std.posix.timespec = undefined;
+        _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_start);
+        const start_ns = @as(u64, @intCast(ts_start.sec)) * 1_000_000_000 + @as(u64, @intCast(ts_start.nsec));
 
         var engine = try ghostlang.ScriptEngine.create(config);
-        const load_time = timer.read();
+        var ts_end: std.posix.timespec = undefined;
+        _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_end);
+        const end_ns = @as(u64, @intCast(ts_end.sec)) * 1_000_000_000 + @as(u64, @intCast(ts_end.nsec));
+        const load_time = end_ns - start_ns;
         engine.deinit();
 
         total_ns += load_time;
@@ -65,11 +70,16 @@ fn benchmarkSimpleExecution(allocator: std.mem.Allocator) !void {
 
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
-        var timer = try std.time.Timer.start();
+        var ts_start: std.posix.timespec = undefined;
+        _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_start);
+        const start_ns = @as(u64, @intCast(ts_start.sec)) * 1_000_000_000 + @as(u64, @intCast(ts_start.nsec));
 
         var script = try engine.loadScript(test_script);
         _ = try script.run();
-        const exec_time = timer.read();
+        var ts_end: std.posix.timespec = undefined;
+        _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_end);
+        const end_ns = @as(u64, @intCast(ts_end.sec)) * 1_000_000_000 + @as(u64, @intCast(ts_end.nsec));
+        const exec_time = end_ns - start_ns;
         script.deinit();
 
         total_ns += exec_time;
@@ -111,10 +121,15 @@ fn benchmarkAPICallsOverhead(allocator: std.mem.Allocator) !void {
 
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
-        var timer = try std.time.Timer.start();
+        var ts_start: std.posix.timespec = undefined;
+        _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_start);
+        const start_ns = @as(u64, @intCast(ts_start.sec)) * 1_000_000_000 + @as(u64, @intCast(ts_start.nsec));
 
         _ = try engine.call("test", .{});
-        const call_time = timer.read();
+        var ts_end: std.posix.timespec = undefined;
+        _ = std.posix.system.clock_gettime(.MONOTONIC, &ts_end);
+        const end_ns = @as(u64, @intCast(ts_end.sec)) * 1_000_000_000 + @as(u64, @intCast(ts_end.nsec));
+        const call_time = end_ns - start_ns;
 
         total_ns += call_time;
     }
