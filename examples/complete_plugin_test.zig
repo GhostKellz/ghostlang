@@ -4,9 +4,9 @@ const grim_integration = @import("grim_integration.zig");
 
 // Complete integration test demonstrating Phase 2 capabilities
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
 
     // Create mock Grim editor state
     var mock_buffer = grim_integration.GrimBuffer{

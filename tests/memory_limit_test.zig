@@ -3,9 +3,9 @@ const ghostlang = @import("ghostlang");
 
 /// Test to verify MemoryLimitAllocator works correctly
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const backing_allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const backing_allocator = debug_allocator.allocator();
 
     std.debug.print("\n=== Testing MemoryLimitAllocator ===\n\n", .{});
 

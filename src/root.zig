@@ -334,7 +334,7 @@ const ScriptArray = struct {
         const array = try allocator.create(ScriptArray);
         array.* = .{
             .allocator = allocator,
-            .items = .{},
+            .items = .empty,
             .ref_count = 1,
         };
         return array;
@@ -479,7 +479,7 @@ const ScriptIterator = struct {
             .allocator = allocator,
             .ref_count = 1,
             .kind = .table,
-            .state = .{ .table = .{ .table_ptr = table_ptr, .keys = .{}, .index = 0 } },
+            .state = .{ .table = .{ .table_ptr = table_ptr, .keys = .empty, .index = 0 } },
             .current_key = .{ .nil = {} },
             .current_value = .{ .nil = {} },
             .has_key = false,
@@ -896,7 +896,7 @@ pub const ScriptEngine = struct {
             .tracked_allocator = limiter.allocator(),
             .security = SecurityContext.init(config),
             .grove = undefined,
-            .diagnostics = .{},
+            .diagnostics = .empty,
             .metrics = ParseMetrics.init(),
             .plugins = PluginManager.init(limiter.allocator()),
             .arena = arena,
@@ -993,7 +993,7 @@ pub const ScriptEngine = struct {
         parse_result.constants = &[_]ScriptValue{};
         parse_result.syntax_tree = SyntaxTree{
             .allocator = self.tracked_allocator,
-            .nodes = .{},
+            .nodes = .empty,
             .instruction_count = 0,
             .constant_count = 0,
         };
@@ -1093,7 +1093,7 @@ pub const ScriptEngine = struct {
     };
 
     pub fn call(self: *ScriptEngine, function: []const u8, args: anytype) ExecutionError!ScriptValue {
-        var prepared = std.ArrayListUnmanaged(PreparedArg){};
+        var prepared: std.ArrayListUnmanaged(PreparedArg) = .empty;
         defer {
             for (prepared.items) |*entry| {
                 if (entry.owned) {
@@ -1734,7 +1734,7 @@ pub const SyntaxTree = struct {
     constant_count: usize,
 
     pub fn initFromInstructions(allocator: std.mem.Allocator, instructions: []const Instruction, constants_len: usize) !SyntaxTree {
-        var list = std.ArrayListUnmanaged(SyntaxNode){};
+        var list: std.ArrayListUnmanaged(SyntaxNode) = .empty;
         errdefer list.deinit(allocator);
 
         try list.append(allocator, .{ .kind = .root, .opcode = null, .instruction_index = null, .constant_index = null });
@@ -1758,7 +1758,7 @@ pub const SyntaxTree = struct {
 
     pub fn deinit(self: *SyntaxTree) void {
         self.nodes.deinit(self.allocator);
-        self.nodes = .{};
+        self.nodes = .empty;
         self.instruction_count = 0;
         self.constant_count = 0;
     }
@@ -1858,7 +1858,7 @@ pub const PluginManager = struct {
         return .{
             .allocator = allocator,
             .plugins = std.StringHashMap(PluginRecord).init(allocator),
-            .load_order = .{},
+            .load_order = .empty,
         };
     }
 
@@ -2221,9 +2221,9 @@ pub const VM = struct {
         var vm = VM{
             .registers = undefined,
             .globals = std.StringHashMap(ScriptValue).init(allocator),
-            .scopes = .{},
-            .call_stack = .{},
-            .protected_calls = .{},
+            .scopes = .empty,
+            .call_stack = .empty,
+            .protected_calls = .empty,
             .pc = 0,
             .code = code,
             .constants = constants,
@@ -2259,7 +2259,7 @@ pub const VM = struct {
         // Track freed string pointers to detect and prevent double-frees
         // This is necessary because of a known issue where string pointers can end up
         // in multiple registers due to optimization or register reuse patterns
-        var freed_strings = std.ArrayListUnmanaged([*]const u8){};
+        var freed_strings: std.ArrayListUnmanaged([*]const u8) = .empty;
         defer freed_strings.deinit(self.allocator);
 
         var reg_idx: usize = 0;
@@ -4068,7 +4068,7 @@ fn parseClassChar(ch: u8) ?PatternClass {
 }
 
 fn compilePattern(allocator: std.mem.Allocator, pattern: []const u8) PatternError!Pattern {
-    var elements = std.ArrayList(PatternElement){};
+    var elements: std.ArrayList(PatternElement) = .empty;
     errdefer elements.deinit(allocator);
 
     var capture_stack: [max_pattern_captures]usize = undefined;
@@ -4345,7 +4345,7 @@ fn performGlobalSubstitute(
     var compiled = try compilePattern(allocator, pattern_text);
     defer compiled.deinit();
 
-    var builder = std.ArrayList(u8){};
+    var builder: std.ArrayList(u8) = .empty;
     errdefer builder.deinit(allocator);
 
     var cursor: usize = 0;
@@ -4655,7 +4655,7 @@ pub const BuiltinFunctions = struct {
         }
 
         // Build the concatenated string
-        var result = std.ArrayListUnmanaged(u8){};
+        var result: std.ArrayListUnmanaged(u8) = .empty;
         defer result.deinit(allocator);
 
         for (items, 0..) |item, i| {
@@ -4866,7 +4866,7 @@ pub const BuiltinFunctions = struct {
 
         const format_str = args[0].string;
         const allocator = helperAllocator() orelse return .{ .nil = {} };
-        var builder = std.ArrayList(u8){};
+        var builder: std.ArrayList(u8) = .empty;
         errdefer builder.deinit(allocator);
 
         var i: usize = 0;
@@ -5298,7 +5298,7 @@ pub const BuiltinFunctions = struct {
         if (args.len < 1) return .{ .nil = {} };
 
         const allocator = helperAllocator() orelse return .{ .nil = {} };
-        var parts = std.ArrayListUnmanaged([]const u8){};
+        var parts: std.ArrayListUnmanaged([]const u8) = .empty;
         defer parts.deinit(allocator);
 
         for (args) |arg| {
@@ -6162,8 +6162,8 @@ pub const Parser = struct {
                 .result_reg = 0,
                 .base_scope_depth = 0,
                 .loop_scope_base = 0,
-                .break_jumps = .{},
-                .continue_jumps = .{},
+                .break_jumps = .empty,
+                .continue_jumps = .empty,
             };
         }
 
@@ -6178,7 +6178,7 @@ pub const Parser = struct {
         names: std.ArrayListUnmanaged([]const u8),
 
         fn init(function_depth: usize) ScopeBinding {
-            return .{ .function_depth = function_depth, .names = .{} };
+            return .{ .function_depth = function_depth, .names = .empty };
         }
 
         fn deinit(self: *ScopeBinding, allocator: std.mem.Allocator) void {
@@ -6200,8 +6200,8 @@ pub const Parser = struct {
             return .{
                 .base_scope_depth = base_scope_depth,
                 .params_registered = false,
-                .pending_params = .{},
-                .capture_names = .{},
+                .pending_params = .empty,
+                .capture_names = .empty,
                 .is_vararg = false,
             };
         }
@@ -6242,7 +6242,7 @@ pub const Parser = struct {
             }
             self.capture_names.items.len = 0;
             self.capture_names.deinit(allocator);
-            self.capture_names = .{};
+            self.capture_names = .empty;
             return slice;
         }
     };
@@ -6268,9 +6268,9 @@ pub const Parser = struct {
             .line = 1,
             .column = 1,
             .scope_depth = 0,
-            .loop_stack = .{},
-            .function_stack = .{},
-            .scope_bindings = .{},
+            .loop_stack = .empty,
+            .function_stack = .empty,
+            .scope_bindings = .empty,
             .suppress_range_concat = false,
         };
     }
@@ -6294,8 +6294,8 @@ pub const Parser = struct {
             self.scope_bindings.deinit(self.allocator);
         }
 
-        var constants: std.ArrayListUnmanaged(ScriptValue) = .{};
-        var instructions: std.ArrayListUnmanaged(Instruction) = .{};
+        var constants: std.ArrayListUnmanaged(ScriptValue) = .empty;
+        var instructions: std.ArrayListUnmanaged(Instruction) = .empty;
         var cleanup_on_error = true;
         errdefer {
             if (cleanup_on_error) {
@@ -6435,7 +6435,7 @@ pub const Parser = struct {
         }
         fn_ctx.pending_params.items.len = 0;
         fn_ctx.pending_params.deinit(self.allocator);
-        fn_ctx.pending_params = .{};
+        fn_ctx.pending_params = .empty;
         fn_ctx.params_registered = true;
     }
 
@@ -6672,7 +6672,7 @@ pub const Parser = struct {
 
     fn parseIfStatement(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction)) anyerror!u16 {
         var block_style: ?BlockStyle = null;
-        var exit_jumps = std.ArrayListUnmanaged(usize){};
+        var exit_jumps: std.ArrayListUnmanaged(usize) = .empty;
         defer exit_jumps.deinit(self.allocator);
 
         const first_cond = try self.parseConditionExpression(constants, instructions, 0);
@@ -6787,7 +6787,7 @@ pub const Parser = struct {
             return try self.parseNumericForLoop(constants, instructions, first_name);
         }
 
-        var name_list = std.ArrayListUnmanaged([]const u8){};
+        var name_list: std.ArrayListUnmanaged([]const u8) = .empty;
         defer {
             var idx: usize = 0;
             while (idx < name_list.items.len) : (idx += 1) {
@@ -7062,7 +7062,7 @@ pub const Parser = struct {
         loop_ctx.loop_scope_base = self.scope_depth;
         loop_ctx.result_reg = cond_reg;
 
-        var name_indices = std.ArrayListUnmanaged(u16){};
+        var name_indices: std.ArrayListUnmanaged(u16) = .empty;
         defer name_indices.deinit(self.allocator);
 
         var idx: usize = 0;
@@ -7249,7 +7249,7 @@ pub const Parser = struct {
 
         const owned_params = try params.toOwnedSlice(self.allocator);
         params.*.deinit(self.allocator);
-        params.* = .{};
+        params.* = .empty;
         defer {
             for (owned_params) |param| {
                 self.allocator.free(param);
@@ -7277,7 +7277,7 @@ pub const Parser = struct {
         const func_name = try self.parseIdent();
         defer self.allocator.free(func_name);
 
-        var params = std.ArrayListUnmanaged([]const u8){};
+        var params: std.ArrayListUnmanaged([]const u8) = .empty;
         var params_cleanup = true;
         errdefer if (params_cleanup) {
             var idx: usize = 0;
@@ -7308,7 +7308,7 @@ pub const Parser = struct {
         const func_name = try self.parseIdent();
         defer self.allocator.free(func_name);
 
-        var params = std.ArrayListUnmanaged([]const u8){};
+        var params: std.ArrayListUnmanaged([]const u8) = .empty;
         var params_cleanup = true;
         errdefer if (params_cleanup) {
             var idx: usize = 0;
@@ -7338,7 +7338,7 @@ pub const Parser = struct {
     }
 
     fn parseFunctionExpression(self: *Parser, constants: *std.ArrayListUnmanaged(ScriptValue), instructions: *std.ArrayListUnmanaged(Instruction), reg: u16) anyerror!ParseResult {
-        var params = std.ArrayListUnmanaged([]const u8){};
+        var params: std.ArrayListUnmanaged([]const u8) = .empty;
         var params_cleanup = true;
         errdefer if (params_cleanup) {
             var idx: usize = 0;
@@ -7378,10 +7378,10 @@ pub const Parser = struct {
         var has_variadic = false;
         if (has_expression) {
             const base_reg: u16 = 0;
-            var values = std.ArrayListUnmanaged(struct {
+            var values: std.ArrayListUnmanaged(struct {
                 result: ParseResult,
                 is_variadic: bool,
-            }){};
+            }) = .empty;
             defer values.deinit(self.allocator);
 
             while (true) {
@@ -7450,7 +7450,7 @@ pub const Parser = struct {
         instructions: *std.ArrayListUnmanaged(Instruction),
         storage_mode: u16,
     ) anyerror!u16 {
-        var names = std.ArrayListUnmanaged([]const u8){};
+        var names: std.ArrayListUnmanaged([]const u8) = .empty;
         defer {
             for (names.items) |name| {
                 self.allocator.free(name);
@@ -7474,7 +7474,7 @@ pub const Parser = struct {
 
         self.skipWhitespace();
 
-        var expr_values = std.ArrayListUnmanaged(ParseResult){};
+        var expr_values: std.ArrayListUnmanaged(ParseResult) = .empty;
         defer expr_values.deinit(self.allocator);
 
         if (self.peek() == '=') {
@@ -7927,7 +7927,7 @@ pub const Parser = struct {
             base_arg_count = 1;
         }
 
-        var arg_results = std.ArrayListUnmanaged(ParseResult){};
+        var arg_results: std.ArrayListUnmanaged(ParseResult) = .empty;
         defer arg_results.deinit(self.allocator);
 
         if (self.peek() != ')') {
@@ -8095,7 +8095,7 @@ pub const Parser = struct {
     fn parseStringLiteral(self: *Parser) ![]u8 {
         if (self.peek() != '"') return error.ParseError;
         self.advance();
-        var buffer = std.ArrayListUnmanaged(u8){};
+        var buffer: std.ArrayListUnmanaged(u8) = .empty;
         errdefer buffer.deinit(self.allocator);
         var closed = false;
         while (self.peek()) |c| {

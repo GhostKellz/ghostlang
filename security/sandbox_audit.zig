@@ -4,9 +4,9 @@ const ghostlang = @import("ghostlang");
 /// Security Audit Suite - Test sandbox escape attempts
 /// This suite attempts various attack vectors to ensure the sandbox is secure
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
 
     std.debug.print("\n=== Ghostlang Security Audit Suite ===\n\n", .{});
 

@@ -4,9 +4,9 @@ const ghostlang = @import("ghostlang");
 /// Fuzzing target for the Ghostlang parser
 /// This will test parser robustness against arbitrary input
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
 
     // Read from stdin
     const stdin = std.io.getStdIn();
@@ -49,9 +49,9 @@ pub fn main() !void {
 export fn LLVMFuzzerTestOneInput(data: [*]const u8, size: usize) callconv(.c) c_int {
     const input = data[0..size];
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
 
     const config = ghostlang.EngineConfig{
         .allocator = allocator,

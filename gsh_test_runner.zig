@@ -2,9 +2,9 @@ const std = @import("std");
 const ghostlang = @import("ghostlang");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
 
     // Read script from file if provided, otherwise use test script
     var script_content: []const u8 = undefined;
