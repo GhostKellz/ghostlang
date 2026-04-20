@@ -424,7 +424,7 @@ fn testClosuresCapture(allocator: std.mem.Allocator) !bool {
         \\total = total + first()
         \\total = total + second()
         \\total = total + second()
-        \\return total
+        \\total
     ;
 
     var loaded = try engine.loadScript(script);

@@ -4,7 +4,7 @@ This directory contains example scripts demonstrating how Ghostlang can be used 
 
 ## Files
 
-### `grim_config.gza` - Editor Configuration
+### `grim_config.gla` - Editor Configuration
 Shows how to configure the editor using Ghostlang:
 - Theme and display settings
 - Key bindings for different modes
@@ -13,7 +13,7 @@ Shows how to configure the editor using Ghostlang:
 - Custom commands
 - Status line configuration
 
-### `buffer_api.gza` - Buffer Manipulation
+### `buffer_api.gla` - Buffer Manipulation
 Demonstrates buffer operations:
 - Creating and modifying buffers
 - Text insertion, deletion, and replacement
@@ -22,7 +22,7 @@ Demonstrates buffer operations:
 - Search functionality
 - Auto-indentation
 
-### `plugin_system.gza` - Plugin Development
+### `plugin_system.gla` - Plugin Development
 Example of a complete plugin:
 - Plugin metadata and state management
 - Language-specific code formatting

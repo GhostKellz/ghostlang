@@ -90,12 +90,12 @@ Added comprehensive test cases for:
 
 #### tree-sitter.json
 - Updated description: "Dual Lua/C-style scripting language"
-- Primary extension: `.gza` (before `.ghost`)
+- Primary extension: `.gla`
 
 #### package.json
 - Updated description
 - Added keywords: `gza`, `lua`, `grove`
-- Primary extension: `.gza`
+- Primary extension: `.gla`
 
 ### 6. Documentation
 
@@ -137,7 +137,7 @@ Tested with comprehensive v0.1.0 test file including:
 For Grove to integrate this grammar:
 
 1. ✅ Copy tree-sitter-ghostlang/ to Grove's vendor/grammars/
-2. ✅ Update Grove's language registry with `.gza` as primary extension
+2. ✅ Update Grove's language registry with `.gla` as primary extension
 3. ✅ Configure dual comment prefixes (`//` and `--`)
 4. ✅ Build parser with tree-sitter 25.0 ABI 15
 5. ✅ Enable all query files (highlights, locals, injections, textobjects)
@@ -165,14 +165,14 @@ For Grove to integrate this grammar:
 - `UPGRADE_v0.1.0.md` - THIS FILE
 
 ### Sample Files
-- `test_v0.1.ghost` - Comprehensive dual-syntax test file
+- `test_v0.1.gla` - Comprehensive dual-syntax test file
 
 ## Parser Statistics
 
 - **Generated successfully:** ✅
 - **Conflicts resolved:** 5 (all necessary for dual-syntax ambiguity)
 - **Test coverage:** 20+ test cases
-- **Supported file extensions:** `.gza` (primary), `.ghost` (alias)
+- **Supported file extensions:** `.gla`
 - **Tree-sitter version:** 25.0.10
 - **ABI version:** 15
 
@@ -182,7 +182,7 @@ The grammar is **production-ready**. Grove needs to:
 
 1. Update to tree-sitter 25.0+ if not already
 2. Copy the grammar to vendor directory
-3. Register ghostlang with `.gza` as primary extension
+3. Register ghostlang with `.gla` as primary extension
 4. Configure dual comment support
 5. Test syntax highlighting with provided test files
 
@@ -197,6 +197,6 @@ The grammar is **production-ready**. Grove needs to:
 - ✅ Multiple return values
 - ✅ Break and continue keywords
 - ✅ Dual comment styles (`--` and `//`)
-- ✅ Primary `.gza` extension
+- ✅ Primary `.gla` extension
 
 **The next-generation Lua alternative + C-style flexibility grammar is ready for Grove integration!** 🚀

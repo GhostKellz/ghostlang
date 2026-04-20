@@ -20,11 +20,11 @@ Complete guide for integrating Ghostlang as Grim editor's plugin system with Pha
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │  Grim Editor    │◄──►│  Ghostlang VM    │◄──►│ User Scripts    │
-│  (Zig Core)     │    │  (Embedded)      │    │ (.gza files)    │
+│  (Zig Core)     │    │  (Embedded)      │    │ (.gla files)    │
 ├─────────────────┤    ├──────────────────┤    ├─────────────────┤
-│ • Buffer Mgmt   │    │ • Script Engine  │    │ • config.gza    │
+│ • Buffer Mgmt   │    │ • Script Engine  │    │ • config.gla    │
 │ • Event System  │    │ • FFI Bindings   │    │ • plugins/      │
-│ • Command Proc  │    │ • Memory Safety  │    │ • keybinds.gza  │
+│ • Command Proc  │    │ • Memory Safety  │    │ • keybinds.gla  │
 │ • File I/O      │    │ • Sandboxing     │    │ • themes/       │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
@@ -51,7 +51,7 @@ pub fn initGrimPluginSystem(allocator: std.mem.Allocator) !void {
     defer engine.deinit();
 
     // Load and execute user plugin safely
-    const plugin_source = try loadUserPlugin("user_plugin.ghost");
+    const plugin_source = try loadUserPlugin("user_plugin.gla");
     const result = try engine.executePlugin(plugin_source);
 
     // Handle result with no crash risk
@@ -169,7 +169,7 @@ Ready-to-use plugin templates demonstrating common editor operations:
 ### Text Manipulation Plugin
 
 ```javascript
-// examples/plugins/text_manipulation.ghost
+// examples/plugins/text_manipulation.gla
 function duplicateLine() {
     var line = getCurrentLine();
     var text = getLineText(line);
@@ -208,7 +208,7 @@ duplicateLine();
 ### Navigation Plugin
 
 ```javascript
-// examples/plugins/navigation.ghost
+// examples/plugins/navigation.gla
 function gotoMatchingBracket() {
     var pos = getCursorPosition();
     var text = getLineText(pos.line);
@@ -259,7 +259,7 @@ gotoMatchingBracket();
 ### Formatting Plugin
 
 ```javascript
-// examples/plugins/formatting.ghost
+// examples/plugins/formatting.gla
 function formatDocument() {
     var language = getFileLanguage();
 
@@ -516,9 +516,9 @@ pub const PluginManager = struct {
    - Error recovery
 
 4. **Example Plugin Library**
-   - Text manipulation examples (`examples/plugins/text_manipulation.ghost`)
-   - Navigation examples (`examples/plugins/navigation.ghost`)
-   - Formatting examples (`examples/plugins/formatting.ghost`)
+   - Text manipulation examples (`examples/plugins/text_manipulation.gla`)
+   - Navigation examples (`examples/plugins/navigation.gla`)
+   - Formatting examples (`examples/plugins/formatting.gla`)
    - Copy-paste ready for users
 
 ### Integration Steps for Grim

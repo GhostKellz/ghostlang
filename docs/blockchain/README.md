@@ -28,7 +28,7 @@ GhostLang v0.2.3+ includes first-class support for blockchain and Web3 developme
 
 ### Hello World Contract
 
-```gza
+```ghostlang
 -- Simple greeting contract
 local greeting = "Hello, GhostChain!"
 
@@ -44,7 +44,7 @@ end
 
 ### Token Contract
 
-```gza
+```ghostlang
 -- ERC20-like token
 local balances = {}
 local total_supply = 0
@@ -88,7 +88,7 @@ Every GhostLang smart contract has:
 3. **Events**: Log emissions for off-chain indexing
 4. **Modifiers**: Access control and validation
 
-```gza
+```ghostlang
 -- State variables (persistent)
 local owner = nil
 local counter = 0
@@ -115,7 +115,7 @@ end
 
 ```bash
 # Compile contract
-ghostlang compile MyContract.gza --output contract.wasm
+ghostlang compile MyContract.gla --output contract.wasm
 
 # Deploy to GhostChain
 ghostchain deploy contract.wasm --gas 1000000
@@ -128,7 +128,7 @@ ghostchain call <contract-address> increment --gas 100000
 
 ### Context Functions
 
-```gza
+```ghostlang
 -- Get caller address (msg.sender)
 local caller = web3.getCaller()
 
@@ -148,7 +148,7 @@ local timestamp = web3.getTimestamp()
 
 ### Cryptographic Functions
 
-```gza
+```ghostlang
 -- Hash data
 local hash = web3.hash("some data")
 
@@ -161,7 +161,7 @@ local random = web3.random()
 
 ### Storage Operations
 
-```gza
+```ghostlang
 -- Store value (costs gas)
 web3.storageSet(key, value)
 
@@ -174,7 +174,7 @@ local value = web3.storageGet(key)
 
 ### Event Emission
 
-```gza
+```ghostlang
 -- Emit event with indexed topics
 emit("Transfer", {
     from = sender,
@@ -191,7 +191,7 @@ emit("Transfer", {
 
 **Option 1: Global Variables (Automatic)**
 
-```gza
+```ghostlang
 -- Automatically persisted
 local balances = {}
 local owner = web3.getCaller()
@@ -199,7 +199,7 @@ local owner = web3.getCaller()
 
 **Option 2: Explicit Storage (Advanced)**
 
-```gza
+```ghostlang
 -- Manual control over storage slots
 local BALANCE_SLOT = web3.hash("balances")
 
@@ -230,7 +230,7 @@ Events are crucial for:
 - Frontend notifications
 - Debugging and auditing
 
-```gza
+```ghostlang
 -- Basic event
 emit("UserRegistered", user_address)
 
@@ -248,7 +248,7 @@ emit("Swap", {
 
 Up to 3 topics can be indexed for efficient queries:
 
-```gza
+```ghostlang
 -- Topic 1: event signature hash
 -- Topic 2: from address (indexed)
 -- Topic 3: to address (indexed)
@@ -264,7 +264,7 @@ emit("Transfer", {from = alice, to = bob, amount = 100})
 ### Best Practices
 
 1. **Minimize Storage Writes**
-   ```gza
+   ```ghostlang
    -- ❌ Bad: multiple writes
    balances[alice] = balances[alice] - 10
    balances[bob] = balances[bob] + 10
@@ -277,7 +277,7 @@ emit("Transfer", {from = alice, to = bob, amount = 100})
    ```
 
 2. **Use Local Variables**
-   ```gza
+   ```ghostlang
    -- ❌ Bad: repeated storage loads
    if balances[user] > 100 and balances[user] < 1000 then
        balances[user] = balances[user] + 50
@@ -291,7 +291,7 @@ emit("Transfer", {from = alice, to = bob, amount = 100})
    ```
 
 3. **Early Returns**
-   ```gza
+   ```ghostlang
    function transfer(to, amount)
        -- Check conditions early
        if amount == 0 then return false end
@@ -308,7 +308,7 @@ emit("Transfer", {from = alice, to = bob, amount = 100})
 
 ```bash
 # Profile contract execution
-ghostlang profile MyContract.gza --function transfer --args "0x123,1000"
+ghostlang profile MyContract.gla --function transfer --args "0x123,1000"
 
 # Output:
 # Function: transfer
@@ -324,7 +324,7 @@ ghostlang profile MyContract.gza --function transfer --args "0x123,1000"
 
 ### Access Control
 
-```gza
+```ghostlang
 local owner = web3.getCaller()
 
 function onlyOwner()
@@ -339,7 +339,7 @@ end
 
 ### Reentrancy Protection
 
-```gza
+```ghostlang
 local locked = false
 
 function noReentrancy()
@@ -365,7 +365,7 @@ end
 
 ### Input Validation
 
-```gza
+```ghostlang
 function transfer(to, amount)
     -- Validate inputs
     web3.require(amount > 0, "Amount must be positive")
@@ -380,7 +380,7 @@ end
 
 ### Integer Overflow Protection
 
-```gza
+```ghostlang
 -- GhostLang uses 64-bit integers by default
 -- For 256-bit operations, use SafeMath library
 
@@ -400,19 +400,19 @@ end
 
 ### NFT Contract
 
-See [`examples/nft.gza`](./examples/nft.gza)
+See [`examples/nft.gla`](./examples/nft.gla)
 
 ### DAO Governance
 
-See [`examples/dao.gza`](./examples/dao.gza)
+See [`examples/dao.gla`](./examples/dao.gla)
 
 ### DeFi Staking
 
-See [`examples/staking.gza`](./examples/staking.gza)
+See [`examples/staking.gla`](./examples/staking.gla)
 
 ### Multisig Wallet
 
-See [`examples/multisig.gza`](./examples/multisig.gza)
+See [`examples/multisig.gla`](./examples/multisig.gla)
 
 ## Integration with GhostChain
 
@@ -431,7 +431,7 @@ See [`examples/multisig.gza`](./examples/multisig.gza)
 
 Contracts can query GhostChain state:
 
-```gza
+```ghostlang
 -- Get validator set
 local validators = ghostchain.getValidators()
 

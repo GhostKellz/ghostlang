@@ -54,10 +54,10 @@ zig build-exe fuzz/parser_fuzz.zig -fsanitize=fuzzer
 ## Corpus
 
 The `corpus/` directory contains seed inputs for fuzzing:
-- `basic.ghost` - Valid basic arithmetic
-- `variable.ghost` - Variable declarations and assignments
-- `control_flow.ghost` - Loops and conditionals
-- `malformed.ghost` - Intentionally broken syntax for edge case testing
+- `basic.gla` - Valid basic arithmetic
+- `variable.gla` - Variable declarations and assignments
+- `control_flow.gla` - Loops and conditionals
+- `malformed.gla` - Intentionally broken syntax for edge case testing
 
 ## Findings
 

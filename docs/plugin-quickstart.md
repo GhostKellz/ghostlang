@@ -14,7 +14,7 @@ Ghostlang is a lightweight scripting language designed specifically for editor p
 
 ###  Step 1: Create Plugin File
 
-Create `hello.gza`:
+Create `hello.gla`:
 
 ```ghostlang
 // My first plugin
@@ -25,7 +25,7 @@ greeting
 ### Step 2: Test It
 
 ```bash
-cat hello.gza | ./zig-out/bin/ghostlang
+cat hello.gla | ./zig-out/bin/ghostlang
 # Output: Script result: 7
 ```
 
@@ -120,7 +120,7 @@ var result = code_lines
 result
 ```
 
-**Save as:** `examples/plugins/line_counter.gza`
+**Save as:** `examples/plugins/line_counter.gla`
 
 ---
 
@@ -273,7 +273,7 @@ notify("Replaced: " + replacements)
 
 ```bash
 # Run your plugin
-cat my_plugin.gza | ./zig-out/bin/ghostlang
+cat my_plugin.gla | ./zig-out/bin/ghostlang
 ```
 
 ### Integration Test

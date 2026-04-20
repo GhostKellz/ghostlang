@@ -2,12 +2,11 @@
 
 ## Overview
 
-This tree-sitter grammar enables Grove to provide syntax highlighting, parsing, and navigation support for Ghostlang (`.gza` and `.ghost`) files.
+This tree-sitter grammar enables Grove to provide syntax highlighting, parsing, and navigation support for Ghostlang (`.gla`) files.
 
 **Tree-sitter Version:** 25.0+ (ABI 15)
 **Language Version:** Ghostlang 0.1.0
-**Primary Extension:** `.gza`
-**Alias Extension:** `.ghost`
+**Primary Extension:** `.gla`
 
 ## Features
 
@@ -157,7 +156,7 @@ cp -r /path/to/ghostlang/tree-sitter-ghostlang vendor/grammars/ghostlang
 
 **Note:** The grammar includes a `tree-sitter.json` configuration file required by tree-sitter 25.0+ for ABI 15 support. This file defines:
 - Grammar metadata (version, license, authors)
-- File type associations (`.ghost`, `.gza`)
+- File type associations (`.gla`)
 - Query file mappings (highlights, locals, injections, textobjects)
 
 ### 2. Add to Grove's Language Registry
@@ -168,7 +167,7 @@ pub const LanguageConfig = struct {
     // ... existing languages
     .ghostlang => .{
         .name = "Ghostlang",
-        .extensions = &.{".gza", ".ghost"},  // .gza is primary
+        .extensions = &.{".gla"},
         .tree_sitter = "ghostlang",
         .comment_prefix_c = "//",      // C-style comments
         .comment_prefix_lua = "--",    // Lua-style comments
@@ -344,7 +343,7 @@ This makes Grove responsive even with large Ghostlang plugin files.
 ✅ **Local Scopes** - Variable reference tracking with `local` support
 ✅ **Language Injections** - Embedded language support
 ✅ **Test Coverage** - Comprehensive Lua-style test suite passing
-✅ **Primary Extension** - `.gza` prioritized over `.ghost`
+✅ **Primary Extension** - `.gla`
 🔄 **Grove Integration** - Ready for Grove with full v0.1.0 support!
 
 The Ghostlang v0.1.0 tree-sitter grammar is **production-ready** for Grove integration with complete dual-syntax support!

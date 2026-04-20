@@ -16,7 +16,7 @@
 
 ### Prerequisites
 
-- Zig 0.16.0-dev or later
+- Zig 0.17.0-dev or later
 - GhostLang v0.2.3+
 - Basic understanding of blockchain concepts
 
@@ -30,9 +30,9 @@ zig build
 
 ### Your First Contract
 
-Create `HelloWorld.gza`:
+Create `HelloWorld.gla`:
 
-```gza
+```ghostlang
 -- Simple greeting contract
 local greeting = "Hello, Blockchain!"
 
@@ -58,7 +58,7 @@ end
 
 Follow GhostLang syntax (Lua-compatible):
 
-```gza
+```ghostlang
 -- State variables
 local owner = nil
 local balance = 0
@@ -150,7 +150,7 @@ pub fn main() !void {
 Use gas profiling to identify expensive operations:
 
 **Before:**
-```gza
+```ghostlang
 -- ❌ Inefficient: Multiple storage writes
 function transfer(to, amount)
     balances[from] = balances[from] - amount
@@ -159,7 +159,7 @@ end
 ```
 
 **After:**
-```gza
+```ghostlang
 -- ✅ Optimized: Batch updates
 function transfer(to, amount)
     local new_from = balances[from] - amount
@@ -293,7 +293,7 @@ zig build profile
 
 #### 1. Minimize Storage Operations
 
-```gza
+```ghostlang
 -- ❌ Bad: 4 storage operations
 function swap(amount_in)
     local reserve_in = reserves[token_in]
@@ -313,7 +313,7 @@ end
 
 #### 2. Use Local Variables
 
-```gza
+```ghostlang
 -- ❌ Bad: Multiple table lookups
 if balances[user] > 100 and balances[user] < 1000 then
     balances[user] = balances[user] + 50
@@ -328,7 +328,7 @@ end
 
 #### 3. Batch Operations
 
-```gza
+```ghostlang
 -- ❌ Bad: N function calls
 for i = 1, #recipients do
     transfer(recipients[i], amounts[i])
@@ -347,7 +347,7 @@ end
 
 #### 4. Short-circuit Evaluation
 
-```gza
+```ghostlang
 -- ❌ Bad: Always evaluates both conditions
 function canWithdraw(user, amount)
     if isNotLocked(user) and balances[user] >= amount then
@@ -368,7 +368,7 @@ end
 
 ### 1. Access Control
 
-```gza
+```ghostlang
 local owner = nil
 
 function init()
@@ -387,7 +387,7 @@ end
 
 ### 2. Reentrancy Protection
 
-```gza
+```ghostlang
 local locked = false
 
 function noReentry()
@@ -410,7 +410,7 @@ end
 
 ### 3. Input Validation
 
-```gza
+```ghostlang
 function transfer(to, amount)
     web3.require(to ~= nil, "Invalid recipient")
     web3.require(amount > 0, "Amount must be positive")
@@ -442,7 +442,7 @@ end
 
 ```bash
 # Compile contract
-ghostchain-cli compile MyContract.gza --output contract.bytecode
+ghostchain-cli compile MyContract.gla --output contract.bytecode
 
 # Deploy contract
 ghostchain-cli deploy contract.bytecode \

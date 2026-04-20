@@ -142,8 +142,8 @@ end
 -- Load and merge config
 var config = table_merge(defaults, user_config)  -- ~10 strings
 var paths = {
-    path_join("src", "main.gza"),
-    path_join("lib", "utils.gza")
+    path_join("src", "main.gla"),
+    path_join("lib", "utils.gla")
 }
 -- Total leak: ~15 strings × 30 bytes = ~450 bytes
 ```
@@ -166,7 +166,7 @@ An **arena allocator** allocates memory in large blocks and frees **everything a
 ├─────────────────────────────────────┤
 │ "Alice"                             │
 │ "Hello, Alice"                      │
-│ "/home/user/config.gza"             │
+│ "/home/user/config.gla"             │
 │ ... (thousands of strings)          │
 └─────────────────────────────────────┘
          ↓ engine.deinit()
@@ -244,7 +244,7 @@ With `use_arena: true`:
 4. **Testing and validation** (verify no leaks in CI/CD)
    ```bash
    # Run with arena + memory profiler
-   valgrind --leak-check=full ./ghostlang --use-arena script.gza
+   valgrind --leak-check=full ./ghostlang --use-arena script.gla
    ```
 
 ### ❌ Don't Use Arena Allocators When:

@@ -69,7 +69,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn printUsage(exe_name: []const u8) !void {
-    std.debug.print("Usage: {s} <script.gza>\n", .{exe_name});
+    std.debug.print("Usage: {s} <script.gla>\n", .{exe_name});
 }
 
 fn reportIoError(path: []const u8, err: anyerror) !void {
@@ -187,8 +187,11 @@ test "simple test" {
 
 test "fuzz example" {
     const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
+        fn testOne(context: @This(), smith: *std.testing.Smith) anyerror!void {
             _ = context;
+            var buf: [32]u8 = undefined;
+            const len = smith.slice(&buf);
+            const input = buf[0..len];
             // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
             try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
         }

@@ -51,7 +51,7 @@ pub fn main() !void {
 
 fn cmdDeploy(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (args.len < 1) {
-        std.debug.print("Usage: ghostchain-cli deploy <contract.gza> [--gas-limit LIMIT] [--from ACCOUNT]\n", .{});
+        std.debug.print("Usage: ghostchain-cli deploy <contract.gla> [--gas-limit LIMIT] [--from ACCOUNT]\n", .{});
         return;
     }
 
@@ -223,7 +223,7 @@ fn cmdAccount(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
 fn cmdCompile(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (args.len < 1) {
-        std.debug.print("Usage: ghostchain-cli compile <contract.gza> [--output OUTPUT]\n", .{});
+        std.debug.print("Usage: ghostchain-cli compile <contract.gla> [--output OUTPUT]\n", .{});
         return;
     }
 
@@ -273,11 +273,11 @@ fn printHelp() void {
         \\  ghostchain-cli <command> [options]
         \\
         \\Commands:
-        \\  deploy <contract.gza>              Deploy a smart contract
+        \\  deploy <contract.gla>              Deploy a smart contract
         \\  call <address> <function> [args]   Call a contract function
         \\  query <address> <function> [args]  Query contract state (view)
         \\  account <subcommand>               Manage accounts
-        \\  compile <contract.gza>             Compile contract to bytecode
+        \\  compile <contract.gla>             Compile contract to bytecode
         \\  help                               Show this help message
         \\
         \\Options:
@@ -287,7 +287,7 @@ fn printHelp() void {
         \\  --output FILE                      Output file for compilation
         \\
         \\Examples:
-        \\  ghostchain-cli deploy token.gza --gas-limit 5000000
+        \\  ghostchain-cli deploy token.gla --gas-limit 5000000
         \\  ghostchain-cli call 0xabc123 transfer 0xdef456 1000
         \\  ghostchain-cli query 0xabc123 balanceOf 0xdef456
         \\  ghostchain-cli account new

@@ -35,7 +35,7 @@ You should see `Script result: 7`, which comes from executing the bundled `3 + 4
 
 ## 🚀 Your First Script
 
-Create `hello.gza` with the following contents:
+Create `hello.gla` with the following contents:
 
 ```ghost
 var who = "Ghostlang"
@@ -51,7 +51,7 @@ print("feature enabled?", enable_feature)
 Run it with the demo binary:
 
 ```bash
-./zig-out/bin/ghostlang hello.gza
+./zig-out/bin/ghostlang hello.gla
 ```
 
 ## � Language Basics (Today)

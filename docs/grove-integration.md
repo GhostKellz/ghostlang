@@ -8,8 +8,7 @@ This guide covers how to integrate the Ghostlang v0.1.0 tree-sitter grammar into
 
 **Tree-sitter Version:** 25.0+ (ABI 15)
 **Ghostlang Version:** 0.1.0
-**Primary Extension:** `.gza`
-**Alias Extension:** `.ghost`
+**Primary Extension:** `.gla`
 **Syntax Support:** Lua-style AND C-style (dual syntax)
 
 ## ✅ v0.1.0 Grammar Status - COMPLETE!
@@ -87,7 +86,7 @@ Add Ghostlang to Grove's language registry:
 // In Grove's language configuration
 const ghostlang_config = LanguageConfig{
     .name = "ghostlang",
-    .file_extensions = &[_][]const u8{ ".gza", ".ghost" },  // .gza is primary!
+    .file_extensions = &[_][]const u8{ ".gla" },
     .grammar_path = "languages/ghostlang",
     .comment_token_c = "//",   // C-style comments
     .comment_token_lua = "--", // Lua-style comments
@@ -184,7 +183,7 @@ pub const ghostlang_support = struct {
     pub fn setupLanguage(grove: *Grove) !void {
         try grove.registerLanguage(LanguageConfig{
             .name = "ghostlang",
-            .extensions = &[_][]const u8{ ".ghost" },
+            .extensions = &[_][]const u8{ ".gla" },
             .grammar_path = "languages/ghostlang",
 
             // Syntax highlighting
@@ -206,7 +205,7 @@ pub const ghostlang_support = struct {
 
 ### 1. Create Test File
 
-Create `test_plugin.gza`:
+Create `test_plugin.gla`:
 
 ```lua
 -- Test Ghostlang v0.1.0 dual-syntax highlighting
@@ -335,7 +334,7 @@ Configure Grove to recognize Ghostlang files:
 // File associations
 const file_associations = &[_]FileAssociation{
     .{
-        .pattern = "*.ghost",
+        .pattern = "*.gla",
         .language = "ghostlang",
         .icon = "🔮",
     },
@@ -364,7 +363,7 @@ With this v0.1.0 integration, Grove will provide:
 - ✅ **Complete syntax highlighting** for both Lua and C-style code
 - ✅ **Smart code navigation** and text selection for all constructs
 - ✅ **Language-aware editing** with proper scoping
-- ✅ **File association**: Primary `.gza`, alias `.ghost`
+- ✅ **File association**: `.gla`
 - ✅ **Special highlighting** for all v0.1.0 built-in functions:
   - Array functions (`arrayPush`, `tableInsert`, etc.)
   - Object/table functions (`pairs`, `ipairs`, `objectKeys`)

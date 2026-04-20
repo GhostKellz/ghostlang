@@ -517,7 +517,7 @@ autocmd BufWritePre * %s/\s\+$//e
 autocmd BufRead *.md setlocal spell
 
 " Ghostlang: focus on transformations
-// Plugin: trim-whitespace.gza
+// Plugin: trim-whitespace.gla
 var i = 0
 while (i < getLineCount()) {
     var text = getLineText(i)

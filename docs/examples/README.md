@@ -6,45 +6,45 @@ This directory contains practical examples demonstrating various aspects of Ghos
 
 ### [Basic Examples](basic/)
 Learn the fundamentals of Ghostlang:
-- [Hello World](basic/hello-world.gza) - Your first Ghostlang program
-- [Variables and Types](basic/variables.gza) - Working with different data types
-- [Control Flow](basic/control-flow.gza) - Conditionals and loops
-- [Functions](basic/functions.gza) - Function definitions and calls
-- [Tables and Arrays](basic/data-structures.gza) - Working with complex data
-- [String Operations](basic/strings.gza) - Text processing examples
-- [File I/O](basic/file-io.gza) - Reading and writing files
+- [Hello World](basic/hello-world.gla) - Your first Ghostlang program
+- [Variables and Types](basic/variables.gla) - Working with different data types
+- [Control Flow](basic/control-flow.gla) - Conditionals and loops
+- [Functions](basic/functions.gla) - Function definitions and calls
+- [Tables and Arrays](basic/data-structures.gla) - Working with complex data
+- [String Operations](basic/strings.gla) - Text processing examples
+- [File I/O](basic/file-io.gla) - Reading and writing files
 
 ### [Grim Configuration](grim-config/)
 Configure the Grim editor with Ghostlang:
-- [Basic Config](grim-config/init.gza) - Essential editor configuration
-- [Key Bindings](grim-config/keybindings.gza) - Custom key mappings
-- [Theme Configuration](grim-config/theme.gza) - Visual customization
-- [Advanced Settings](grim-config/advanced.gza) - Power user configurations
+- [Basic Config](grim-config/init.gla) - Essential editor configuration
+- [Key Bindings](grim-config/keybindings.gla) - Custom key mappings
+- [Theme Configuration](grim-config/theme.gla) - Visual customization
+- [Advanced Settings](grim-config/advanced.gla) - Power user configurations
 
 ### [Plugin Development](plugins/)
 Build plugins for the Grim editor:
-- [Simple Plugin](plugins/hello-plugin.gza) - Basic plugin structure
-- [Auto-Formatter](plugins/auto-formatter.gza) - Code formatting plugin
-- [File Tree](plugins/file-tree.gza) - File browser sidebar
-- [Status Line](plugins/status-line.gza) - Custom status line
-- [Fuzzy Finder](plugins/fuzzy-finder.gza) - File search functionality
+- [Simple Plugin](plugins/hello-plugin.gla) - Basic plugin structure
+- [Auto-Formatter](plugins/auto-formatter.gla) - Code formatting plugin
+- [File Tree](plugins/file-tree.gla) - File browser sidebar
+- [Status Line](plugins/status-line.gla) - Custom status line
+- [Fuzzy Finder](plugins/fuzzy-finder.gla) - File search functionality
 
 ### [FFI Examples](ffi/)
 Integrate with Zig code using FFI:
-- [Basic FFI](ffi/basic-ffi.gza) - Simple function calls
-- [Buffer Operations](ffi/buffer-api.gza) - Editor buffer manipulation
-- [System Integration](ffi/system-calls.gza) - OS interaction
-- [Custom Libraries](ffi/custom-lib.gza) - Using external libraries
+- [Basic FFI](ffi/basic-ffi.gla) - Simple function calls
+- [Buffer Operations](ffi/buffer-api.gla) - Editor buffer manipulation
+- [System Integration](ffi/system-calls.gla) - OS interaction
+- [Custom Libraries](ffi/custom-lib.gla) - Using external libraries
 
 ## Running Examples
 
 ### Individual Examples
 ```bash
 # Run a specific example
-./zig-out/bin/ghostlang docs/examples/basic/hello-world.gza
+./zig-out/bin/ghostlang docs/examples/basic/hello-world.gla
 
 # Run with output
-./zig-out/bin/ghostlang docs/examples/basic/control-flow.gza
+./zig-out/bin/ghostlang docs/examples/basic/control-flow.gla
 ```
 
 ### Interactive Mode

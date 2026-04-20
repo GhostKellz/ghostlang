@@ -4,7 +4,7 @@ This directory contains working example plugins demonstrating common editor oper
 
 ## Available Plugins
 
-### 1. Line Numbers (`line_numbers.gza`)
+### 1. Line Numbers (`line_numbers.gla`)
 Adds line numbers to the current buffer with configurable formatting.
 
 **Features:**
@@ -20,7 +20,7 @@ var number_width = 4
 
 ---
 
-### 2. Auto Indent (`auto_indent.gza`)
+### 2. Auto Indent (`auto_indent.gla`)
 Automatically indents code based on context (braces, parentheses, keywords).
 
 **Features:**
@@ -37,7 +37,7 @@ var use_spaces = true
 
 ---
 
-### 3. Comment Toggle (`comment_toggle.gza`)
+### 3. Comment Toggle (`comment_toggle.gla`)
 Toggles line or block comments for selected text.
 
 **Features:**
@@ -53,7 +53,7 @@ var comment_style = 2  // 1=line, 2=block
 
 ---
 
-### 4. Word Count (`word_count.gza`)
+### 4. Word Count (`word_count.gla`)
 Counts words, characters, and lines in selection or entire buffer.
 
 **Features:**
@@ -69,7 +69,7 @@ var count_mode = 1  // 1=selection, 2=buffer, 3=paragraph
 
 ---
 
-### 5. Duplicate Line (`duplicate_line.gza`)
+### 5. Duplicate Line (`duplicate_line.gla`)
 Duplicates the current line or selected lines.
 
 **Features:**
@@ -183,7 +183,7 @@ When integrated with Grim, these functions will be available:
 
 To add your plugin to this collection:
 
-1. Create `your_plugin.gza` in this directory
+1. Create `your_plugin.gla` in this directory
 2. Follow the established structure and conventions
 3. Add documentation to this README
 4. Test thoroughly with `zig build test-plugins`

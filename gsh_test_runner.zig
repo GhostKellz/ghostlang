@@ -21,7 +21,7 @@ pub fn main() !void {
         should_free = true;
     } else {
         script_content =
-            \\print("No script file provided. Use: gsh_test script.gza")
+            \\print("No script file provided. Use: gsh_test script.gla")
         ;
     }
     defer if (should_free) allocator.free(script_content);

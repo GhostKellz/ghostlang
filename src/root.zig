@@ -2027,6 +2027,7 @@ const CallFrame = struct {
     scope_depth: usize,
     varargs: []ScriptValue,
     owns_varargs: bool,
+    saved_registers: []ScriptValue,
     protected_index: ?usize,
 };
 
@@ -2296,6 +2297,7 @@ pub const VM = struct {
         self.scopes.deinit(self.allocator);
         for (self.call_stack.items) |frame| {
             self.cleanupVarargs(frame);
+            self.cleanupSavedRegisters(frame.saved_registers);
         }
         self.call_stack.deinit(self.allocator);
         self.protected_calls.deinit(self.allocator);
@@ -2841,7 +2843,7 @@ pub const VM = struct {
                     }
 
                     const frame_idx = self.call_stack.items.len - 1;
-                    const frame = self.call_stack.items[frame_idx];
+                    var frame = self.call_stack.items[frame_idx];
                     const source_reg = instr.operands[0];
                     const fixed_count = instr.operands[1];
                     const variadic_flag = instr.operands[2] == 1;
@@ -2884,8 +2886,21 @@ pub const VM = struct {
                         self.registers[src_idx] = .{ .nil = {} };
                     }
 
+                    const dest_start = operandIndex(dest_base);
+                    const dest_end = dest_start + dest_count;
+                    var restore_idx: usize = 0;
+                    while (restore_idx < frame.saved_registers.len) : (restore_idx += 1) {
+                        if (restore_idx >= dest_start and restore_idx < dest_end) {
+                            frame.saved_registers[restore_idx].deinit(self.allocator);
+                        } else {
+                            self.setRegister(@intCast(restore_idx), frame.saved_registers[restore_idx]);
+                        }
+                        frame.saved_registers[restore_idx] = .{ .nil = {} };
+                    }
+
                     self.call_stack.items.len = frame_idx;
                     self.cleanupVarargs(frame);
+                    self.cleanupSavedRegisters(frame.saved_registers);
                     if (frame.protected_index) |pidx| {
                         const final_count = try self.finalizeProtectedSuccess(pidx, actual_count);
                         self.pc = frame.return_pc;
@@ -3195,6 +3210,23 @@ pub const VM = struct {
             }
         }
 
+        const save_count = operandIndex(arg_start);
+        const empty_saved = [_]ScriptValue{};
+        var saved_registers: []ScriptValue = empty_saved[0..];
+        var saved_count: usize = 0;
+        if (save_count > 0) {
+            saved_registers = try self.allocator.alloc(ScriptValue, save_count);
+            errdefer {
+                while (saved_count > 0) : (saved_count -= 1) {
+                    saved_registers[saved_count - 1].deinit(self.allocator);
+                }
+                self.allocator.free(saved_registers);
+            }
+            while (saved_count < save_count) : (saved_count += 1) {
+                saved_registers[saved_count] = try self.copyValue(self.registers[saved_count]);
+            }
+        }
+
         const base_scope_depth = self.scopes.items.len;
         const frame_idx = self.call_stack.items.len;
         try self.call_stack.append(self.allocator, .{
@@ -3204,6 +3236,7 @@ pub const VM = struct {
             .scope_depth = base_scope_depth,
             .varargs = varargs_slice,
             .owns_varargs = frame_owns_varargs,
+            .saved_registers = saved_registers,
             .protected_index = protected_index,
         });
         varargs_allocated = false;
@@ -3211,18 +3244,21 @@ pub const VM = struct {
             if (self.call_stack.items.len > frame_idx) {
                 const frame = self.call_stack.items[self.call_stack.items.len - 1];
                 self.cleanupVarargs(frame);
+                self.cleanupSavedRegisters(frame.saved_registers);
                 self.call_stack.items.len = frame_idx;
-            } else if (frame_owns_varargs) {
+            } else {
                 const tmp_frame = CallFrame{
                     .return_pc = 0,
                     .return_base = 0,
                     .expected_results = 0,
                     .scope_depth = 0,
                     .varargs = varargs_slice,
-                    .owns_varargs = true,
+                    .owns_varargs = frame_owns_varargs,
+                    .saved_registers = saved_registers,
                     .protected_index = protected_index,
                 };
                 self.cleanupVarargs(tmp_frame);
+                self.cleanupSavedRegisters(tmp_frame.saved_registers);
             }
         }
 
@@ -3378,6 +3414,7 @@ pub const VM = struct {
             const frame = self.call_stack.items[idx];
             self.call_stack.items.len = idx;
             self.cleanupVarargs(frame);
+            self.cleanupSavedRegisters(frame.saved_registers);
 
             while (self.scopes.items.len > frame.scope_depth) {
                 _ = self.popScope() catch {};
@@ -3455,6 +3492,15 @@ pub const VM = struct {
             frame.varargs[idx].deinit(self.allocator);
         }
         self.allocator.free(frame.varargs);
+    }
+
+    fn cleanupSavedRegisters(self: *VM, saved_registers: []ScriptValue) void {
+        if (saved_registers.len == 0) return;
+        var idx: usize = 0;
+        while (idx < saved_registers.len) : (idx += 1) {
+            saved_registers[idx].deinit(self.allocator);
+        }
+        self.allocator.free(saved_registers);
     }
 
     fn coerceIteratorValue(self: *VM, value: ScriptValue, var_count: u16) ExecutionError!ScriptValue {
@@ -6072,7 +6118,7 @@ pub const Script = struct {
         var wrote = false;
         var it = map.iterator();
         while (it.next()) |entry| {
-            if (try self.writeValueSummary(writer, label, entry.key_ptr.* , entry.value_ptr.*)) {
+            if (try self.writeValueSummary(writer, label, entry.key_ptr.*, entry.value_ptr.*)) {
                 wrote = true;
             }
         }
@@ -9076,6 +9122,32 @@ test "closure captures outer variable" {
     const result = try script.run();
     try std.testing.expect(result == .number);
     try std.testing.expectEqual(@as(f64, 12), result.number);
+}
+
+test "script call inside generic loop preserves accumulator register" {
+    const allocator = std.testing.allocator;
+    const config = EngineConfig{ .allocator = allocator };
+    var engine = try ScriptEngine.create(config);
+    defer engine.deinit();
+
+    const source =
+        \\local function inc(x)
+        \\    return x + 10
+        \\end
+        \\var list = [1, 2, 3]
+        \\var total = 0
+        \\for value in list do
+        \\    total = total + inc(value)
+        \\end
+        \\total
+    ;
+
+    var script = try engine.loadScript(source);
+    defer script.deinit();
+
+    const result = try script.run();
+    try std.testing.expect(result == .number);
+    try std.testing.expectEqual(@as(f64, 36), result.number);
 }
 
 test "pcall handles success and failure" {

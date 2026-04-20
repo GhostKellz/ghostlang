@@ -5,6 +5,20 @@ All notable changes to Ghostlang will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] - 2026-04-20
+
+### Fixed
+- Restored Zig 0.17 development compatibility for the core test suite by updating `std.testing.fuzz` usage to the current stdlib API
+- Fixed script-function register preservation across nested calls, resolving the generic iterator/function regression exposed by the integration suite
+- Corrected the stale closure integration case to match Ghostlang's existing top-level return semantics
+
+### Changed
+- Standardized Ghostlang source files on the `.gla` extension across docs, examples, tests, fuzz corpus files, and vendored grammar metadata
+- Updated integration and blockchain documentation to reflect the current `.gla` conventions and Zig 0.17 development baseline
+
+### Added
+- Added a regression test covering script calls inside generic loops so accumulator registers remain stable across nested calls
+
 ## [Unreleased] - Phase 2 Complete - 2024-12-XX
 
 **🎉 MAJOR MILESTONE: Phase 2 Complete - Production-Ready Grim Integration**

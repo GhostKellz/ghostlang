@@ -390,7 +390,7 @@ local cache_enabled = config.cache.enabled
 
 ### Creating Modules
 ```lua
--- mathutils.gza
+-- mathutils.gla
 local mathutils = {}
 
 function mathutils.add(a, b)

@@ -4,12 +4,13 @@
   <img src="assets/icons/glang-proto.png" alt="ghostlang logo" width="200"/>
 </p>
 
-[![CI/CD](https://github.com/GhostKellz/ghostlang/actions/workflows/main.yml/badge.svg)](https://github.com/GhostKellz/ghostlang/actions/workflows/main.yml)
-[![Built with Zig](https://img.shields.io/badge/built%20with-Zig-F7A41D?logo=zig&logoColor=white)](https://ziglang.org/)
-[![Version](https://img.shields.io/badge/version-0.16.0--dev-orange)](https://github.com/GhostKellz/ghostlang/releases)
-[![Tree-sitter](https://img.shields.io/badge/tree--sitter-grammar-green?logo=tree-sitter&logoColor=white)](https://tree-sitter.github.io/)
-[![Cross Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://github.com/GhostKellz/ghostlang)
-[![Documentation](https://img.shields.io/badge/docs-available-brightgreen)](https://github.com/GhostKellz/ghostlang/tree/main/docs)
+<p align="center">
+  <img src="https://img.shields.io/badge/Zig-F7A41D?style=for-the-badge&logo=zig&logoColor=white" alt="Zig">
+  <img src="https://img.shields.io/badge/Tree--sitter-6EBF8B?style=for-the-badge&logo=treesitter&logoColor=white" alt="Tree-sitter">
+  <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
+  <img src="https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">
+  <img src="https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows">
+</p>
 
 A lightweight embedded scripting engine written in Zig, designed as a modern replacement for Lua. It provides Lua-like syntax with JavaScript compatibility, sandboxing, foreign function interface, and optional JIT compilation.
 
@@ -78,12 +79,12 @@ zig build
 After building, execute Ghostlang scripts directly from the CLI:
 
 ```bash
-./zig-out/bin/ghostlang path/to/script.gza
+./zig-out/bin/ghostlang path/to/script.gla
 ```
 
 ### Example Plugin Script
 
-Create `plugin.gza`:
+Create `plugin.gla`:
 
 ```ghostlang
 -- Simple Ghostlang plugin
@@ -105,12 +106,12 @@ on_command("demo")
 Run it with the CLI:
 
 ```bash
-./zig-out/bin/ghostlang plugin.gza
+./zig-out/bin/ghostlang plugin.gla
 ```
 
 ## File Extension
 
-Scripts use the `.gza` extension (ghostlang zig assembly).
+Scripts use the `.gla` extension.
 
 ## QA & Security Testing
 

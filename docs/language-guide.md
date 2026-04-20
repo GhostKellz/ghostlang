@@ -457,7 +457,7 @@ local greeting = "Hello" .. " " .. "World"
 ### Creating a Module
 
 ```lua
--- mathutils.gza
+-- mathutils.gla
 local mathutils = {}
 
 function mathutils.add(a, b)
@@ -476,7 +476,7 @@ return mathutils
 ### Using a Module
 
 ```lua
--- main.gza
+-- main.gla
 local math = require("mathutils")
 
 local sum = math.add(10, 20)
