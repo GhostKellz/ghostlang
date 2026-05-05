@@ -236,7 +236,8 @@ pub const GasProfiler = struct {
         }
 
         std.debug.print("Top Gas Consumers:\n", .{});
-        std.debug.print("-" ** 60 ++ "\n", .{});
+        const separator: [60]u8 = @splat('-');
+        std.debug.print(separator ++ "\n", .{});
 
         var it = self.instruction_costs.iterator();
         while (it.next()) |entry| {

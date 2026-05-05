@@ -168,7 +168,7 @@ pub const TestEnvironment = struct {
             .nonce = self.state.getNonce(caller),
             .gas_limit = gas_limit,
             .gas_price = 1,
-            .signature = [_]u8{0} ** 64, // Mock signature for testing
+            .signature = @splat(0), // Mock signature for testing
         };
 
         const receipt = try executor.execute(tx);

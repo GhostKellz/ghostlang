@@ -165,9 +165,9 @@ pub const WorldState = struct {
     /// Get storage value
     pub fn storageGet(self: *WorldState, contract: web3.Address, key: web3.Hash) web3.Hash {
         if (self.storage.get(contract)) |contract_storage| {
-            return contract_storage.get(key) orelse [_]u8{0} ** 32;
+            return contract_storage.get(key) orelse @as(web3.Hash, @splat(0));
         }
-        return [_]u8{0} ** 32;
+        return @splat(0);
     }
 
     /// Set storage value
@@ -449,7 +449,7 @@ pub const TransactionExecutor = struct {
             .state = self.state,
             .contract_address = contract,
             .block_number = self.block_number,
-            .tx_hash = [_]u8{0} ** 32, // No tx hash for constructor
+            .tx_hash = @splat(0), // No tx hash for constructor
         };
         var balance_query_impl = WorldStateBalanceQuery{ .state = self.state };
 
@@ -576,8 +576,8 @@ test "world state basics" {
     var state = WorldState.init(allocator);
     defer state.deinit();
 
-    const alice = [_]u8{0xAA} ** 32;
-    const bob = [_]u8{0xBB} ** 32;
+    const alice: [32]u8 = @splat(0xAA);
+    const bob: [32]u8 = @splat(0xBB);
 
     // Set balances
     try state.setBalance(alice, 1000);
@@ -599,7 +599,7 @@ test "contract deployment" {
     var state = WorldState.init(allocator);
     defer state.deinit();
 
-    const contract_addr = [_]u8{0xCC} ** 32;
+    const contract_addr: [32]u8 = @splat(0xCC);
     const bytecode = "compiled_contract_bytecode";
 
     try state.deployContract(contract_addr, bytecode);
@@ -614,9 +614,9 @@ test "storage operations" {
     var state = WorldState.init(allocator);
     defer state.deinit();
 
-    const contract = [_]u8{0xCC} ** 32;
-    const key = [_]u8{0x01} ** 32;
-    const value = [_]u8{0x42} ** 32;
+    const contract: [32]u8 = @splat(0xCC);
+    const key: [32]u8 = @splat(0x01);
+    const value: [32]u8 = @splat(0x42);
 
     try state.storageSet(contract, key, value);
 
@@ -630,18 +630,19 @@ test "transaction execution" {
     var state = WorldState.init(allocator);
     defer state.deinit();
 
-    const alice = [_]u8{0xAA} ** 32;
-    const bob = [_]u8{0xBB} ** 32;
+    const alice: [32]u8 = @splat(0xAA);
+    const bob: [32]u8 = @splat(0xBB);
 
     // Setup initial balances
     try state.setBalance(alice, 10000);
 
+    const validator: [32]u8 = @splat(0x99);
     var executor = TransactionExecutor.init(
         allocator,
         &state,
         1, // block number
         1234567890, // timestamp
-        [_]u8{0x99} ** 32, // validator
+        validator,
         1, // chain_id
     );
 
@@ -653,7 +654,7 @@ test "transaction execution" {
         .nonce = 0,
         .gas_limit = 100000,
         .gas_price = 1,
-        .signature = [_]u8{0} ** 64,
+        .signature = @splat(0),
     };
 
     const receipt = try executor.execute(tx);

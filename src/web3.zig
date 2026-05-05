@@ -248,14 +248,14 @@ pub const ABI = struct {
 
     /// Encode uint256
     pub fn encodeUint256(value: u256) [32]u8 {
-        var result: [32]u8 = [_]u8{0} ** 32;
+        var result: [32]u8 = @splat(0);
         std.mem.writeInt(u256, &result, value, .big);
         return result;
     }
 
     /// Encode uint64
     pub fn encodeUint64(value: u64) [32]u8 {
-        var result: [32]u8 = [_]u8{0} ** 32;
+        var result: [32]u8 = @splat(0);
         std.mem.writeInt(u64, result[24..32], value, .big);
         return result;
     }
@@ -493,7 +493,7 @@ pub const Crypto = struct {
 /// Address utilities
 pub const AddressUtil = struct {
     /// Zero address (0x0000...0000)
-    pub const ZERO = [_]u8{0} ** 32;
+    pub const ZERO: [32]u8 = @splat(0);
 
     /// Check if address is zero
     pub fn isZero(address: Address) bool {
@@ -773,7 +773,7 @@ test "ECDSA signature verification" {
 
 test "ECDSA invalid signature length" {
     const message_hash = Crypto.hash("test");
-    const short_sig = [_]u8{0} ** 32; // Too short
+    const short_sig: [32]u8 = @splat(0); // Too short
 
     const result = Crypto.recoverAddress(message_hash, &short_sig);
     try std.testing.expectError(SignatureError.InvalidSignatureLength, result);

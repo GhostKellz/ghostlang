@@ -3793,7 +3793,7 @@ const PatternClass = enum {
 };
 
 const PatternCharSet = struct {
-    bits: [256]bool = [_]bool{false} ** 256,
+    bits: [256]bool = @splat(false),
 
     fn setChar(self: *PatternCharSet, ch: u8) void {
         self.bits[ch] = true;
@@ -3864,9 +3864,9 @@ const PatternState = struct {
 
     fn init(capture_total: usize) PatternState {
         return PatternState{
-            .captures = [_]CaptureState{CaptureState{}} ** max_pattern_captures,
+            .captures = @splat(CaptureState{}),
             .capture_total = capture_total,
-            .stack = [_]usize{0} ** max_pattern_captures,
+            .stack = @splat(0),
             .stack_len = 0,
         };
     }
@@ -4027,7 +4027,7 @@ const Pattern = struct {
         while (start <= subject.len) {
             const state = PatternState.init(self.capture_total);
             if (self.matchElements(subject, start, 0, state)) |outcome| {
-                var captures: [max_pattern_captures]CaptureRange = [_]CaptureRange{CaptureRange{}} ** max_pattern_captures;
+                var captures: [max_pattern_captures]CaptureRange = @splat(CaptureRange{});
                 var idx: usize = 0;
                 while (idx < self.capture_total) : (idx += 1) {
                     const capture_state = outcome.state.captures[idx];

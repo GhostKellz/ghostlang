@@ -25,8 +25,8 @@ pub const VMProfiler = struct {
 
     pub fn init() VMProfiler {
         return .{
-            .instruction_counts = [_]usize{0} ** opcode_count,
-            .instruction_times = [_]u64{0} ** opcode_count,
+            .instruction_counts = @as([opcode_count]usize, @splat(0)),
+            .instruction_times = @as([opcode_count]u64, @splat(0)),
             .total_instructions = 0,
             .total_time_ns = 0,
             .max_stack_depth = 0,
@@ -36,8 +36,8 @@ pub const VMProfiler = struct {
     }
 
     pub fn reset(self: *VMProfiler) void {
-        self.instruction_counts = [_]usize{0} ** opcode_count;
-        self.instruction_times = [_]u64{0} ** opcode_count;
+        self.instruction_counts = @as([opcode_count]usize, @splat(0));
+        self.instruction_times = @as([opcode_count]u64, @splat(0));
         self.total_instructions = 0;
         self.total_time_ns = 0;
         self.max_stack_depth = 0;
@@ -171,13 +171,13 @@ fn populateHeuristicDistribution(
     total_time_ns: u64,
     failing_opcode: ?ghostlang.Opcode,
 ) void {
-    profiler.instruction_counts = [_]usize{0} ** opcode_count;
-    profiler.instruction_times = [_]u64{0} ** opcode_count;
+    profiler.instruction_counts = @as([opcode_count]usize, @splat(0));
+    profiler.instruction_times = @as([opcode_count]u64, @splat(0));
     profiler.total_time_ns = total_time_ns;
 
     var executed = script.vm.instruction_count;
 
-    var static_counts = [_]usize{0} ** opcode_count;
+    var static_counts = @as([opcode_count]usize, @splat(0));
     var total_static: usize = 0;
     for (script.syntax_tree.iter()) |node| {
         if (node.kind != .instruction) continue;
@@ -201,7 +201,7 @@ fn populateHeuristicDistribution(
     profiler.total_instructions = executed;
 
     var assigned_total: usize = 0;
-    var remainders = [_]usize{0} ** opcode_count;
+    var remainders = @as([opcode_count]usize, @splat(0));
 
     for (0..opcode_count) |i| {
         const static_count = static_counts[i];
